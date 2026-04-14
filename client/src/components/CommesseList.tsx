@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Table,
@@ -14,6 +14,10 @@ import {
   Spinner,
   Card,
   CardBody,
+  CardHeader,
+  Button,
+  Divider,
+  Tooltip,
 } from '@heroui/react';
 import { fetchCommesse } from '../services/api';
 import { Commessa, CommessaRaw, mapCommessa, TipologiaCommessaMap } from '../types/commessa';
@@ -24,21 +28,36 @@ const tipologiaOptions = Object.entries(TipologiaCommessaMap).map(([value, label
 }));
 
 function formatDate(dateStr: string | null): string {
-  if (!dateStr) return '-';
-  return new Date(dateStr).toLocaleDateString('it-IT');
+  if (!dateStr) return '—';
+  return new Date(dateStr).toLocaleDateString('it-IT', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
 }
 
 function formatCurrency(value: number | null): string {
-  if (value == null) return '-';
+  if (value == null) return '—';
   return value.toLocaleString('it-IT', { style: 'currency', currency: 'EUR' });
 }
+
+const tipologiaColorMap: Record<string, 'primary' | 'secondary' | 'success' | 'warning' | 'danger' | 'default'> = {
+  'Impianto FV (<20 kWp)': 'warning',
+  'Impianto FV (>20 kWp)': 'warning',
+  'Impianto FV+ACC': 'success',
+  'Solare Termico': 'danger',
+  'Climatizzatori': 'secondary',
+  'PDC': 'primary',
+  'Caldaia': 'default',
+  'Altro': 'default',
+};
 
 export default function CommesseList() {
   const [search, setSearch] = useState('');
   const [tipologiaFilter, setTipologiaFilter] = useState<string>('');
   const [statoFilter, setStatoFilter] = useState<string>('');
 
-  const { data: rawData, isLoading, error } = useQuery<CommessaRaw[]>({
+  const { data: rawData, isLoading, error, refetch } = useQuery<CommessaRaw[]>({
     queryKey: ['commesse'],
     queryFn: fetchCommesse,
     staleTime: 5 * 60 * 1000,
@@ -49,7 +68,6 @@ export default function CommesseList() {
     return rawData.map(mapCommessa);
   }, [rawData]);
 
-  // Extract unique stati for filter
   const statiOptions = useMemo(() => {
     const set = new Set<string>();
     commesse.forEach((c) => {
@@ -58,7 +76,6 @@ export default function CommesseList() {
     return Array.from(set).sort();
   }, [commesse]);
 
-  // Apply filters
   const filtered = useMemo(() => {
     let result = commesse;
 
@@ -87,113 +104,236 @@ export default function CommesseList() {
     return result;
   }, [commesse, search, tipologiaFilter, statoFilter]);
 
+  const hasFilters = search || tipologiaFilter || statoFilter;
+
+  const clearFilters = useCallback(() => {
+    setSearch('');
+    setTipologiaFilter('');
+    setStatoFilter('');
+  }, []);
+
   if (isLoading) {
     return (
-      <div className="flex justify-center items-center py-20">
-        <Spinner label="Caricamento commesse..." size="lg" />
-      </div>
+      <Card className="shadow-md">
+        <CardBody className="flex flex-col items-center justify-center py-24 gap-4">
+          <Spinner size="lg" color="primary" />
+          <p className="text-default-400 text-sm">Caricamento commesse...</p>
+        </CardBody>
+      </Card>
     );
   }
 
   if (error) {
     return (
-      <Card className="mx-4 mt-4">
-        <CardBody>
-          <p className="text-danger text-center">
-            Errore nel caricamento delle commesse: {(error as Error).message}
-          </p>
+      <Card className="shadow-md border-danger/20">
+        <CardBody className="flex flex-col items-center justify-center py-16 gap-4">
+          <div className="w-16 h-16 rounded-full bg-danger/10 flex items-center justify-center text-3xl">
+            !
+          </div>
+          <div className="text-center">
+            <p className="text-danger font-semibold text-lg">Errore di caricamento</p>
+            <p className="text-default-400 text-sm mt-1">{(error as Error).message}</p>
+          </div>
+          <Button color="primary" variant="flat" onPress={() => refetch()}>
+            Riprova
+          </Button>
         </CardBody>
       </Card>
     );
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <Input
-          placeholder="Cerca per nome, nr, cliente, descrizione..."
-          value={search}
-          onValueChange={setSearch}
-          isClearable
-          onClear={() => setSearch('')}
-          className="sm:max-w-xs"
-          startContent={<span className="text-default-400">🔍</span>}
-        />
-        <Select
-          placeholder="Tipologia"
-          selectedKeys={tipologiaFilter ? [tipologiaFilter] : []}
-          onSelectionChange={(keys) => {
-            const val = Array.from(keys)[0] as string | undefined;
-            setTipologiaFilter(val ?? '');
-          }}
-          className="sm:max-w-xs"
-        >
-          {tipologiaOptions.map((opt) => (
-            <SelectItem key={opt.value}>{opt.label}</SelectItem>
-          ))}
-        </Select>
-        <Select
-          placeholder="Stato Commessa"
-          selectedKeys={statoFilter ? [statoFilter] : []}
-          onSelectionChange={(keys) => {
-            const val = Array.from(keys)[0] as string | undefined;
-            setStatoFilter(val ?? '');
-          }}
-          className="sm:max-w-xs"
-        >
-          {statiOptions.map((stato) => (
-            <SelectItem key={stato}>{stato}</SelectItem>
-          ))}
-        </Select>
+    <div className="flex flex-col gap-6">
+      {/* Header + Stats */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Commesse</h1>
+          <p className="text-default-400 text-sm mt-0.5">
+            {commesse.length} commess{commesse.length === 1 ? 'a' : 'e'} totali
+          </p>
+        </div>
+        <div className="flex gap-3">
+          <Card shadow="sm" className="px-4 py-2">
+            <div className="text-center">
+              <p className="text-2xl font-bold text-success">{commesse.filter(c => c.attivo).length}</p>
+              <p className="text-tiny text-default-400">Attive</p>
+            </div>
+          </Card>
+          <Card shadow="sm" className="px-4 py-2">
+            <div className="text-center">
+              <p className="text-2xl font-bold text-default-400">{commesse.filter(c => !c.attivo).length}</p>
+              <p className="text-tiny text-default-400">Chiuse</p>
+            </div>
+          </Card>
+        </div>
       </div>
 
-      {/* Results count */}
-      <p className="text-sm text-default-500">
-        {filtered.length} commess{filtered.length === 1 ? 'a' : 'e'} trovat{filtered.length === 1 ? 'a' : 'e'}
-      </p>
+      {/* Filters Card */}
+      <Card shadow="sm" className="bg-white">
+        <CardBody className="gap-4">
+          <div className="flex flex-col lg:flex-row gap-3 items-end">
+            <Input
+              label="Cerca"
+              placeholder="Nome, nr, cliente, descrizione, commerciale..."
+              value={search}
+              onValueChange={setSearch}
+              isClearable
+              onClear={() => setSearch('')}
+              className="lg:flex-1"
+              variant="bordered"
+              size="sm"
+              startContent={
+                <svg className="w-4 h-4 text-default-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              }
+            />
+            <Select
+              label="Tipologia"
+              placeholder="Tutte"
+              selectedKeys={tipologiaFilter ? [tipologiaFilter] : []}
+              onSelectionChange={(keys) => {
+                const val = Array.from(keys)[0] as string | undefined;
+                setTipologiaFilter(val ?? '');
+              }}
+              className="lg:w-56"
+              variant="bordered"
+              size="sm"
+            >
+              {tipologiaOptions.map((opt) => (
+                <SelectItem key={opt.value}>{opt.label}</SelectItem>
+              ))}
+            </Select>
+            <Select
+              label="Stato"
+              placeholder="Tutti"
+              selectedKeys={statoFilter ? [statoFilter] : []}
+              onSelectionChange={(keys) => {
+                const val = Array.from(keys)[0] as string | undefined;
+                setStatoFilter(val ?? '');
+              }}
+              className="lg:w-44"
+              variant="bordered"
+              size="sm"
+            >
+              {statiOptions.map((stato) => (
+                <SelectItem key={stato}>{stato}</SelectItem>
+              ))}
+            </Select>
+            {hasFilters && (
+              <Button
+                variant="flat"
+                color="danger"
+                size="sm"
+                onPress={clearFilters}
+                className="min-w-fit"
+              >
+                Resetta
+              </Button>
+            )}
+          </div>
+          {hasFilters && (
+            <p className="text-tiny text-default-400">
+              {filtered.length} risultat{filtered.length === 1 ? 'o' : 'i'} su {commesse.length}
+            </p>
+          )}
+        </CardBody>
+      </Card>
 
       {/* Table */}
-      <Table
-        aria-label="Elenco commesse"
-        isStriped
-        selectionMode="none"
-      >
-        <TableHeader>
-          <TableColumn>NR</TableColumn>
-          <TableColumn>NOME</TableColumn>
-          <TableColumn>CLIENTE</TableColumn>
-          <TableColumn>TIPOLOGIA</TableColumn>
-          <TableColumn>STATO</TableColumn>
-          <TableColumn>DATA COMMESSA</TableColumn>
-          <TableColumn>CONCLUSIONE</TableColumn>
-          <TableColumn align="end">TOTALE</TableColumn>
-        </TableHeader>
-        <TableBody emptyContent="Nessuna commessa trovata">
-          {filtered.map((c) => (
-            <TableRow key={c.id}>
-              <TableCell className="font-mono text-sm">{c.nrCommessa}</TableCell>
-              <TableCell className="font-semibold">{c.nome}</TableCell>
-              <TableCell>{c.clienteNome || '-'}</TableCell>
-              <TableCell>
-                {c.tipologia ? (
-                  <Chip size="sm" variant="flat">{c.tipologia}</Chip>
-                ) : '-'}
-              </TableCell>
-              <TableCell>
-                {c.statoCommessa ? (
-                  <Chip size="sm" variant="flat" color={c.attivo ? 'success' : 'default'}>
-                    {c.statoCommessa}
+      <Card shadow="sm" className="bg-white overflow-hidden">
+        <Table
+          aria-label="Elenco commesse"
+          isHeaderSticky
+          selectionMode="none"
+          classNames={{
+            wrapper: 'max-h-[600px] shadow-none p-0',
+            th: 'bg-default-100 text-default-600 text-xs uppercase tracking-wider',
+            td: 'py-3',
+          }}
+        >
+          <TableHeader>
+            <TableColumn width={70}>NR</TableColumn>
+            <TableColumn minWidth={120}>NOME</TableColumn>
+            <TableColumn minWidth={120}>CLIENTE</TableColumn>
+            <TableColumn minWidth={160}>TIPOLOGIA</TableColumn>
+            <TableColumn width={100}>STATO</TableColumn>
+            <TableColumn width={130}>DATA</TableColumn>
+            <TableColumn width={130}>CONCLUSIONE</TableColumn>
+            <TableColumn width={120} align="end">TOTALE</TableColumn>
+          </TableHeader>
+          <TableBody
+            emptyContent={
+              <div className="flex flex-col items-center py-10 gap-2">
+                <svg className="w-12 h-12 text-default-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-3-3v6m-7 4h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+                <p className="text-default-400 text-sm">Nessuna commessa trovata</p>
+                {hasFilters && (
+                  <Button size="sm" variant="flat" onPress={clearFilters}>
+                    Resetta filtri
+                  </Button>
+                )}
+              </div>
+            }
+          >
+            {filtered.map((c) => (
+              <TableRow key={c.id} className="hover:bg-default-50 cursor-pointer transition-colors">
+                <TableCell>
+                  <span className="font-mono text-xs text-default-500 bg-default-100 px-2 py-0.5 rounded">
+                    {c.nrCommessa}
+                  </span>
+                </TableCell>
+                <TableCell>
+                  <div>
+                    <p className="font-medium text-sm">{c.nome}</p>
+                    {c.commerciale && (
+                      <p className="text-tiny text-default-400">{c.commerciale}</p>
+                    )}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <p className="text-sm">{c.clienteNome || '—'}</p>
+                </TableCell>
+                <TableCell>
+                  {c.tipologia ? (
+                    <Chip
+                      size="sm"
+                      variant="flat"
+                      color={tipologiaColorMap[c.tipologia] ?? 'default'}
+                    >
+                      {c.tipologia}
+                    </Chip>
+                  ) : '—'}
+                </TableCell>
+                <TableCell>
+                  <Chip
+                    size="sm"
+                    variant="dot"
+                    color={c.attivo ? 'success' : 'default'}
+                    classNames={{
+                      dot: c.attivo ? 'bg-success' : 'bg-default-300',
+                    }}
+                  >
+                    {c.statoCommessa || '—'}
                   </Chip>
-                ) : '-'}
-              </TableCell>
-              <TableCell>{formatDate(c.dataCommessa)}</TableCell>
-              <TableCell>{formatDate(c.dataConclusione)}</TableCell>
-              <TableCell className="text-right">{formatCurrency(c.totaleIvaEsclusa)}</TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+                </TableCell>
+                <TableCell>
+                  <span className="text-sm text-default-600">{formatDate(c.dataCommessa)}</span>
+                </TableCell>
+                <TableCell>
+                  <span className="text-sm text-default-600">{formatDate(c.dataConclusione)}</span>
+                </TableCell>
+                <TableCell>
+                  <span className="text-sm font-medium tabular-nums">
+                    {formatCurrency(c.totaleIvaEsclusa)}
+                  </span>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Card>
     </div>
   );
 }

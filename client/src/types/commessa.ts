@@ -23,7 +23,7 @@ export interface CommessaRaw {
   phyo_dataconclusionelavori: string | null;
   phyo_tipologiacommessa: number | null;
   phyo_statocommessa: number | null;
-  phyo_commercialediriferimenro: string | null;
+  phyo_commercialediriferimento: string | null;
   phyo_incentivo: string | null;
   phyo_totaleivaesclusa: number | null;
   _phyo_cliente_value: string | null;
@@ -68,7 +68,7 @@ export function mapCommessa(raw: CommessaRaw): Commessa {
     statoCommessaValue: raw.phyo_statocommessa,
     statoCommessa:
       raw['phyo_statocommessa@OData.Community.Display.V1.FormattedValue'] ?? '',
-    commerciale: raw.phyo_commercialediriferimenro ?? '',
+    commerciale: raw.phyo_commercialediriferimento ?? '',
     incentivo: raw.phyo_incentivo ?? '',
     totaleIvaEsclusa: raw.phyo_totaleivaesclusa,
     clienteId: raw._phyo_cliente_value,

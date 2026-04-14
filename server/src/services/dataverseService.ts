@@ -96,8 +96,8 @@ export class DataverseService {
       });
 
       return response.data.value || [];
-    } catch (error) {
-      console.error(`Query failed for ${entityName}:`, error);
+    } catch (error: any) {
+      console.error(`Query failed for ${entityName}:`, error?.response?.data || error?.message || error);
       throw error;
     }
   }
@@ -171,7 +171,7 @@ export class DataverseService {
         'phyo_dataconclusionelavori',
         'phyo_tipologiacommessa',
         'phyo_statocommessa',
-        'phyo_commercialediriferimenro',
+        'phyo_commercialediriferimento',
         'phyo_incentivo',
         'phyo_totaleivaesclusa',
         '_phyo_cliente_value',
