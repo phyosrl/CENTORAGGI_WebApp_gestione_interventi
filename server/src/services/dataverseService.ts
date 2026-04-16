@@ -179,4 +179,89 @@ export class DataverseService {
       ]
     );
   }
+
+  async getAssistenze(risorsaId?: string): Promise<any[]> {
+    const filter = risorsaId
+      ? `_phyo_risorsa_value eq ${risorsaId}`
+      : undefined;
+
+    return this.query(
+      'phyo_assistenzeregistrazionis',
+      filter,
+      [
+        'phyo_assistenzeregistrazioniid',
+        'phyo_nr',
+        'phyo_data',
+        'phyo_attne',
+        'phyo_oreintervento',
+        'phyo_ore',
+        'phyo_descrizioneintervento',
+        'phyo_oggetto',
+        'phyo_note',
+        'phyo_statoreg',
+        'phyo_statoregistrazione',
+        'phyo_costoorario',
+        'phyo_totale',
+        'phyo_materialeutilizzato',
+        '_phyo_rifassistenza_value',
+        '_phyo_risorsa_value',
+        'statecode'
+      ]
+    );
+  }
+
+  async loginRisorsa(password: string): Promise<any | null> {
+    const results = await this.query(
+      'phyo_risorses',
+      `phyo_password eq '${password.replace(/'/g, "''")}'`,
+      ['phyo_risorseid', 'phyo_name', 'phyo_password']
+    );
+    return results.length > 0 ? results[0] : null;
+  }
+
+  async updateAssistenza(id: string, data: Record<string, any>): Promise<void> {
+    return this.update('phyo_assistenzeregistrazionis', id, data);
+  }
+
+  async createAssistenza(data: Record<string, any>): Promise<string> {
+    return this.create('phyo_assistenzeregistrazionis', data);
+  }
+
+  async getRifAssistenze(): Promise<any[]> {
+    return this.query(
+      'phyo_assistenzes',
+      'statecode eq 0',
+      ['phyo_assistenzeid', 'phyo_nrassistenze', 'phyo_tipologia_assistenza', 'phyo_indirizzoassistenza']
+    );
+  }
+
+  async getAccounts(): Promise<any[]> {
+    return this.query(
+      'accounts',
+      'statecode eq 0',
+      ['accountid', 'name'],
+      'name asc'
+    );
+  }
+
+  async getNextAssistenzaNr(): Promise<string> {
+    const token = await this.getAccessToken();
+    const url = `/api/data/v9.2/phyo_assistenzeregistrazionis?$select=phyo_nr&$orderby=phyo_nr desc&$top=1`;
+    try {
+      const response = await this.client.get(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Prefer: 'odata.include-annotations="*"'
+        }
+      });
+      const records = response.data.value || [];
+      if (records.length === 0) return '1';
+      const lastNr = records[0].phyo_nr;
+      const num = parseInt(lastNr, 10);
+      return isNaN(num) ? '1' : String(num + 1);
+    } catch (error: any) {
+      console.error('getNextAssistenzaNr failed:', error?.response?.data || error?.message);
+      throw error;
+    }
+  }
 }

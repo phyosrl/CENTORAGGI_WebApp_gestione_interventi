@@ -1,3 +1,35 @@
 @import "tailwindcss";
 @config "../tailwind.config.js";
 
+/* Global blue borders */
+:root {
+  --border-blue: #168AAD;
+}
+
+/* HeroUI bordered inputs, selects, textareas */
+[data-slot="input-wrapper"].border-default-200,
+[data-slot="trigger"].border-default-200,
+[data-slot="input-wrapper"][class*="border-"],
+[data-slot="trigger"][class*="border-"] {
+  border-color: #168AAD40 !important;
+}
+[data-slot="input-wrapper"]:hover,
+[data-slot="trigger"]:hover {
+  border-color: #168AAD80 !important;
+}
+[data-slot="input-wrapper"]:focus-within,
+[data-slot="trigger"][aria-expanded="true"] {
+  border-color: #168AAD !important;
+}
+
+/* HeroUI Card borders */
+.heroui-card,
+[data-slot="base"] {
+  border-color: #168AAD30;
+}
+
+/* Navbar border */
+nav[data-slot="base"] {
+  border-color: #168AAD40 !important;
+}
+
