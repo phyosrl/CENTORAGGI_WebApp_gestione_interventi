@@ -50,13 +50,14 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
   const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number } | null>(null);
   const [suggestions, setSuggestions] = useState<NominatimResult[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [inputFocused, setInputFocused] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
 
   // Debounced Nominatim search
   const searchAddress = useCallback((query: string) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (query.length < 3) { setSuggestions([]); setShowSuggestions(false); return; }
+    if (query.length < 3) { setSuggestions([]); return; }
     debounceRef.current = setTimeout(async () => {
       try {
         const res = await fetch(
@@ -65,7 +66,6 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
         );
         const data: NominatimResult[] = await res.json();
         setSuggestions(data);
-        setShowSuggestions(data.length > 0);
       } catch { setSuggestions([]); }
     }, 350);
   }, []);
@@ -74,6 +74,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       if (suggestionsRef.current && !suggestionsRef.current.contains(e.target as Node)) {
+        setInputFocused(false);
         setShowSuggestions(false);
       }
     };
@@ -416,20 +417,25 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
                   setMapCenter(null);
                   searchAddress(val);
                 }}
-                onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true); }}
+                onFocus={() => { setInputFocused(true); }}
+                onBlur={() => {
+                  // Delay to allow click on suggestion
+                  setTimeout(() => setInputFocused(false), 200);
+                }}
                 className="w-full h-[56px] px-3 rounded-xl border-2 border-[#168AAD]/30 bg-white text-sm outline-none focus:border-[#168AAD] transition-colors"
               />
-              {showSuggestions && suggestions.length > 0 && (
+              {inputFocused && suggestions.length > 0 && (
                 <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white rounded-lg shadow-lg border border-[#168AAD]/20 max-h-[200px] overflow-y-auto">
                   {suggestions.map((s) => (
                     <button
                       key={s.place_id}
                       type="button"
                       className="w-full text-left px-3 py-2.5 text-sm hover:bg-[#e8f4f8] transition-colors cursor-pointer border-b border-default-100 last:border-b-0"
+                      onMouseDown={(e) => e.preventDefault()}
                       onClick={() => {
                         setIndirizzo(s.display_name);
                         setMapCenter({ lat: parseFloat(s.lat), lng: parseFloat(s.lon) });
-                        setShowSuggestions(false);
+                        setInputFocused(false);
                         setSuggestions([]);
                         setShowMap(true);
                       }}
