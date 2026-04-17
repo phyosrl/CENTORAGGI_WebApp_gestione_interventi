@@ -14,12 +14,35 @@ export async function fetchCommesse(): Promise<CommessaRaw[]> {
   return data.data;
 }
 
-export async function fetchAssistenzeRegistrazioni(risorsaId: string): Promise<AssistenzaRegistrazioneRaw[]> {
-  const { data } = await api.get<{ success: boolean; data: AssistenzaRegistrazioneRaw[] }>(
-    '/dataverse/assistenze',
-    { params: { risorsaId } }
-  );
-  return data.data;
+export interface PaginatedAssistenzeResponse {
+  data: AssistenzaRegistrazioneRaw[];
+  totalCount: number;
+  skipToken: string | null;
+  hasMore: boolean;
+}
+
+export async function fetchAssistenzeRegistrazioni(
+  risorsaId: string,
+  options?: { pageSize?: number; skipToken?: string }
+): Promise<PaginatedAssistenzeResponse> {
+  const params: Record<string, string> = { risorsaId };
+  if (options?.pageSize) params.pageSize = String(options.pageSize);
+  if (options?.skipToken) params.skipToken = options.skipToken;
+
+  const { data } = await api.get<{
+    success: boolean;
+    data: AssistenzaRegistrazioneRaw[];
+    totalCount?: number;
+    skipToken?: string | null;
+    hasMore?: boolean;
+  }>('/dataverse/assistenze', { params });
+
+  return {
+    data: data.data,
+    totalCount: data.totalCount ?? data.data.length,
+    skipToken: data.skipToken ?? null,
+    hasMore: data.hasMore ?? false,
+  };
 }
 
 export interface LoginResponse {
@@ -44,6 +67,8 @@ export interface UpdateAssistenzaPayload {
   phyo_totale?: string | null;
   _phyo_rifassistenza_value?: string | null;
   _phyo_cliente_value?: string | null;
+  phyo_statoreg?: number | null;
+  phyo_data?: string | null;
 }
 
 export async function updateAssistenza(id: string, payload: UpdateAssistenzaPayload): Promise<void> {
@@ -89,4 +114,40 @@ export interface Account {
 export async function fetchAccounts(): Promise<Account[]> {
   const { data } = await api.get<{ success: boolean; data: Account[] }>('/dataverse/accounts');
   return data.data;
+}
+
+// --- Image Annotations ---
+
+export interface Annotation {
+  annotationid: string;
+  subject: string | null;
+  filename: string;
+  mimetype: string;
+  documentbody: string;
+  createdon: string;
+}
+
+export async function fetchImages(registrazioneId: string): Promise<Annotation[]> {
+  const { data } = await api.get<{ success: boolean; data: Annotation[] }>(
+    `/dataverse/assistenze/${registrazioneId}/images`
+  );
+  return data.data;
+}
+
+export async function uploadImage(
+  registrazioneId: string,
+  filename: string,
+  mimetype: string,
+  documentbody: string,
+  subject?: string
+): Promise<{ id: string }> {
+  const { data } = await api.post<{ success: boolean; id: string }>(
+    `/dataverse/assistenze/${registrazioneId}/images`,
+    { filename, mimetype, documentbody, subject }
+  );
+  return data;
+}
+
+export async function deleteImage(annotationId: string): Promise<void> {
+  await api.delete(`/dataverse/annotations/${annotationId}`);
 }

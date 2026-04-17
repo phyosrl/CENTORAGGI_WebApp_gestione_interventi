@@ -11,6 +11,30 @@ const dataverseService = new DataverseService(
 export async function dataverseAssistenze(request: HttpRequest): Promise<HttpResponseInit> {
   try {
     const risorsaId = request.query.get('risorsaId') || undefined;
+    const pageSizeParam = request.query.get('pageSize');
+    const skipToken = request.query.get('skipToken') || undefined;
+
+    if (pageSizeParam) {
+      const pageSize = parseInt(pageSizeParam, 10);
+      if (isNaN(pageSize) || pageSize < 1 || pageSize > 100) {
+        return { status: 400, jsonBody: { error: 'pageSize deve essere tra 1 e 100' } };
+      }
+
+      const result = await dataverseService.getAssistenzePaged(risorsaId, pageSize, skipToken);
+
+      return {
+        status: 200,
+        jsonBody: {
+          success: true,
+          data: result.data,
+          totalCount: result.totalCount,
+          skipToken: result.skipToken,
+          hasMore: result.skipToken !== null,
+        }
+      };
+    }
+
+    // No pageSize = load all
     const assistenze = await dataverseService.getAssistenze(risorsaId);
     
     return {
@@ -41,6 +65,8 @@ const ALLOWED_FIELDS = new Set([
   'phyo_totale',
   '_phyo_rifassistenza_value',
   '_phyo_cliente_value',
+  'phyo_statoreg',
+  'phyo_data',
 ]);
 
 export async function updateAssistenza(request: HttpRequest): Promise<HttpResponseInit> {
@@ -237,4 +263,97 @@ app.http('getAccounts', {
   authLevel: 'anonymous',
   route: 'dataverse/accounts',
   handler: getAccounts
+});
+
+// --- Annotations (images) ---
+
+export async function getAnnotations(request: HttpRequest): Promise<HttpResponseInit> {
+  try {
+    const registrazioneId = request.params.registrazioneId;
+    if (!registrazioneId) {
+      return { status: 400, jsonBody: { error: 'registrazioneId is required' } };
+    }
+    const items = await dataverseService.getAnnotations(registrazioneId);
+    return {
+      status: 200,
+      jsonBody: { success: true, data: items }
+    };
+  } catch (error: any) {
+    console.error('getAnnotations error:', error.message);
+    return {
+      status: 500,
+      jsonBody: { error: 'Failed to fetch annotations' }
+    };
+  }
+}
+
+app.http('getAnnotations', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'dataverse/assistenze/{registrazioneId}/images',
+  handler: getAnnotations
+});
+
+export async function uploadAnnotation(request: HttpRequest): Promise<HttpResponseInit> {
+  try {
+    const registrazioneId = request.params.registrazioneId;
+    if (!registrazioneId) {
+      return { status: 400, jsonBody: { error: 'registrazioneId is required' } };
+    }
+    const body = await request.json() as any;
+    if (!body.filename || !body.mimetype || !body.documentbody) {
+      return { status: 400, jsonBody: { error: 'filename, mimetype and documentbody are required' } };
+    }
+    const id = await dataverseService.createAnnotation(
+      registrazioneId,
+      body.filename,
+      body.mimetype,
+      body.documentbody,
+      body.subject
+    );
+    return {
+      status: 201,
+      jsonBody: { success: true, id }
+    };
+  } catch (error: any) {
+    console.error('uploadAnnotation error:', error?.response?.data || error.message);
+    return {
+      status: 500,
+      jsonBody: { error: 'Failed to upload image' }
+    };
+  }
+}
+
+app.http('uploadAnnotation', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'dataverse/assistenze/{registrazioneId}/images',
+  handler: uploadAnnotation
+});
+
+export async function deleteAnnotation(request: HttpRequest): Promise<HttpResponseInit> {
+  try {
+    const annotationId = request.params.annotationId;
+    if (!annotationId) {
+      return { status: 400, jsonBody: { error: 'annotationId is required' } };
+    }
+    await dataverseService.deleteAnnotation(annotationId);
+    return {
+      status: 200,
+      jsonBody: { success: true }
+    };
+  } catch (error: any) {
+    console.error('deleteAnnotation error:', error.message);
+    return {
+      status: 500,
+      jsonBody: { error: 'Failed to delete annotation' }
+    };
+  }
+}
+
+app.http('deleteAnnotation', {
+  methods: ['DELETE'],
+  authLevel: 'anonymous',
+  route: 'dataverse/annotations/{annotationId}',
+  handler: deleteAnnotation
 });

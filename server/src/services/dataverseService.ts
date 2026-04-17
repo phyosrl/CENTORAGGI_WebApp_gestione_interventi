@@ -180,6 +180,26 @@ export class DataverseService {
     );
   }
 
+  private readonly assistenzeSelect = [
+    'phyo_assistenzeregistrazioniid',
+    'phyo_nr',
+    'phyo_data',
+    'phyo_attne',
+    'phyo_oreintervento',
+    'phyo_ore',
+    'phyo_descrizioneintervento',
+    'phyo_oggetto',
+    'phyo_note',
+    'phyo_statoreg',
+    'phyo_statoregistrazione',
+    'phyo_costoorario',
+    'phyo_totale',
+    'phyo_materialeutilizzato',
+    '_phyo_rifassistenza_value',
+    '_phyo_risorsa_value',
+    'statecode'
+  ];
+
   async getAssistenze(risorsaId?: string): Promise<any[]> {
     const filter = risorsaId
       ? `_phyo_risorsa_value eq ${risorsaId}`
@@ -188,26 +208,80 @@ export class DataverseService {
     return this.query(
       'phyo_assistenzeregistrazionis',
       filter,
-      [
-        'phyo_assistenzeregistrazioniid',
-        'phyo_nr',
-        'phyo_data',
-        'phyo_attne',
-        'phyo_oreintervento',
-        'phyo_ore',
-        'phyo_descrizioneintervento',
-        'phyo_oggetto',
-        'phyo_note',
-        'phyo_statoreg',
-        'phyo_statoregistrazione',
-        'phyo_costoorario',
-        'phyo_totale',
-        'phyo_materialeutilizzato',
-        '_phyo_rifassistenza_value',
-        '_phyo_risorsa_value',
-        'statecode'
-      ]
+      this.assistenzeSelect
     );
+  }
+
+  async getAssistenzePaged(risorsaId?: string, pageSize?: number, skipToken?: string): Promise<{ data: any[]; totalCount: number; skipToken: string | null }> {
+    const filter = risorsaId
+      ? `_phyo_risorsa_value eq ${risorsaId}`
+      : undefined;
+
+    return this.queryPaged('phyo_assistenzeregistrazionis', {
+      filter,
+      select: this.assistenzeSelect,
+      orderby: 'phyo_nr desc',
+      pageSize,
+      skipToken,
+    });
+  }
+
+  async queryPaged(entityName: string, options: {
+    filter?: string;
+    select?: string[];
+    orderby?: string;
+    pageSize?: number;
+    skipToken?: string;
+  }): Promise<{ data: any[]; totalCount: number; skipToken: string | null }> {
+    const token = await this.getAccessToken();
+
+    let url = `/api/data/v9.2/${entityName}`;
+    const params = new URLSearchParams();
+
+    if (options.filter) params.append('$filter', options.filter);
+    if (options.select?.length) params.append('$select', options.select.join(','));
+    if (options.orderby) params.append('$orderby', options.orderby);
+    params.append('$count', 'true');
+
+    if (options.skipToken) {
+      params.append('$skiptoken', options.skipToken);
+    }
+
+    url += `?${params.toString()}`;
+
+    const preferParts = ['odata.include-annotations="*"'];
+    if (options.pageSize) {
+      preferParts.push(`odata.maxpagesize=${options.pageSize}`);
+    }
+
+    try {
+      const response = await this.client.get(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Prefer: preferParts.join(',')
+        }
+      });
+
+      let skipToken: string | null = null;
+      const rawNextLink: string | undefined = response.data['@odata.nextLink'];
+      if (rawNextLink) {
+        try {
+          const parsed = new URL(rawNextLink);
+          skipToken = parsed.searchParams.get('$skiptoken');
+        } catch {
+          skipToken = null;
+        }
+      }
+
+      return {
+        data: response.data.value || [],
+        totalCount: response.data['@odata.count'] ?? 0,
+        skipToken,
+      };
+    } catch (error: any) {
+      console.error(`QueryPaged failed for ${entityName}:`, error?.response?.data || error?.message || error);
+      throw error;
+    }
   }
 
   async loginRisorsa(password: string): Promise<any | null> {
@@ -261,6 +335,60 @@ export class DataverseService {
       return isNaN(num) ? '1' : String(num + 1);
     } catch (error: any) {
       console.error('getNextAssistenzaNr failed:', error?.response?.data || error?.message);
+      throw error;
+    }
+  }
+
+  async getAnnotations(registrazioneId: string): Promise<any[]> {
+    const token = await this.getAccessToken();
+    const url = `/api/data/v9.2/annotations?$filter=_objectid_value eq '${registrazioneId}' and isdocument eq true&$select=annotationid,subject,filename,mimetype,documentbody,createdon&$orderby=createdon desc`;
+    try {
+      const response = await this.client.get(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Prefer: 'odata.include-annotations="*"'
+        }
+      });
+      return response.data.value || [];
+    } catch (error: any) {
+      console.error('getAnnotations failed:', error?.response?.data || error?.message);
+      throw error;
+    }
+  }
+
+  async createAnnotation(registrazioneId: string, filename: string, mimetype: string, documentbody: string, subject?: string): Promise<string> {
+    const token = await this.getAccessToken();
+    const url = `/api/data/v9.2/annotations`;
+    try {
+      const response = await this.client.post(url, {
+        'objectid_phyo_assistenzeregistrazionid@odata.bind': `/phyo_assistenzeregistrazionis(${registrazioneId})`,
+        subject: subject || 'Foto assistenza',
+        filename,
+        mimetype,
+        documentbody,
+        isdocument: true,
+      }, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        }
+      });
+      const id = response.headers['odata-entityid']?.match(/\(([^)]+)\)/)?.[1] || '';
+      return id;
+    } catch (error: any) {
+      console.error('createAnnotation failed:', error?.response?.data || error?.message);
+      throw error;
+    }
+  }
+
+  async deleteAnnotation(annotationId: string): Promise<void> {
+    const token = await this.getAccessToken();
+    const url = `/api/data/v9.2/annotations(${annotationId})`;
+    try {
+      await this.client.delete(url, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+    } catch (error: any) {
+      console.error('deleteAnnotation failed:', error?.response?.data || error?.message);
       throw error;
     }
   }
