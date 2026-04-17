@@ -164,8 +164,9 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
     });
   }, []);
 
-  const uploadAllImages = useCallback(async () => {
-    if (!assistenza?.id || localPreviews.length === 0) return;
+  const uploadAllImages = useCallback(async (targetId?: string) => {
+    const recordId = targetId || assistenza?.id;
+    if (!recordId || localPreviews.length === 0) return;
     setUploading(true);
     try {
       for (const { file } of localPreviews) {
@@ -177,10 +178,10 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
           };
           reader.readAsDataURL(file);
         });
-        await uploadImage(assistenza.id, file.name, file.type, base64);
+        await uploadImage(recordId, file.name, file.type, base64);
       }
       setLocalPreviews([]);
-      refetchImages();
+      if (!targetId) refetchImages();
       addToast({ title: 'Caricamento completato', description: 'Immagini caricate con successo', color: 'success' });
     } catch {
       addToast({ title: 'Errore', description: 'Caricamento immagini fallito', color: 'danger' });
@@ -243,7 +244,10 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
   const createMutation = useMutation({
     mutationFn: (payload: CreateAssistenzaPayload) =>
       createAssistenza(payload),
-    onSuccess: () => {
+    onSuccess: async (result) => {
+      if (localPreviews.length > 0 && result?.id) {
+        await uploadAllImages(result.id);
+      }
       queryClient.invalidateQueries({ queryKey: ['assistenzeRegistrazioni'] });
       addToast({
         title: 'Creata',
@@ -654,7 +658,6 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
       </Card>
 
       {/* Foto / Allegati */}
-      {!isCreate && (
         <Card shadow="sm" className="bg-white">
           <CardBody className="gap-2.5 p-3">
 
@@ -702,11 +705,11 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
               >
                 Scatta foto
               </Button>
-              {localPreviews.length > 0 && (
+              {localPreviews.length > 0 && !isCreate && (
                 <Button
                   color="primary"
                   isLoading={uploading}
-                  onPress={uploadAllImages}
+                  onPress={() => uploadAllImages()}
                   startContent={!uploading ?
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
@@ -721,7 +724,9 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
             {/* Local previews (not yet uploaded) */}
             {localPreviews.length > 0 && (
               <div>
-                <p className="text-xs text-default-400 mb-2">Da caricare</p>
+                <p className="text-xs text-default-400 mb-2">
+                  Da caricare{isCreate ? ' (verranno caricate al salvataggio)' : ''}
+                </p>
                 <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
                   {localPreviews.map((p, i) => (
                     <div key={i} className="relative group aspect-square rounded-lg overflow-hidden border border-[#168AAD]/20">
@@ -739,8 +744,8 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
               </div>
             )}
 
-            {/* Uploaded images from Dataverse */}
-            {images && images.length > 0 && (
+            {/* Uploaded images from Dataverse (only in edit mode) */}
+            {!isCreate && images && images.length > 0 && (
               <div>
                 <p className="text-xs text-default-400 mb-2">Caricate ({images.length})</p>
                 <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
@@ -779,7 +784,6 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
             )}
           </CardBody>
         </Card>
-      )}
     </div>
   );
 }
