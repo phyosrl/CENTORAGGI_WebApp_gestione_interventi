@@ -28,7 +28,8 @@ type AssistenzaEditProps =
 export default function AssistenzaEdit(props: AssistenzaEditProps) {
   const { onBack } = props;
   const isCreate = !props.assistenza;
-  const assistenza = props.assistenza;
+  const assistenza = props.assistenza as AssistenzaRegistrazione | undefined;
+  const a = assistenza!; // safe: used only when !isCreate
   const queryClient = useQueryClient();
 
   const [attne, setAttne] = useState(assistenza?.attne ?? '');
@@ -203,14 +204,14 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
           ) : (
             <>
               <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-xl sm:text-2xl font-bold text-foreground">{assistenza.nr}</h1>
-                <Chip size="sm" variant="flat" color="primary">{assistenza.statoReg}</Chip>
-                <Chip size="sm" variant="dot" color={assistenza.statoRegistrazione === 'Aperta' ? 'primary' : 'default'}>
-                  {assistenza.statoRegistrazione}
+                <h1 className="text-xl sm:text-2xl font-bold text-foreground">{a.nr}</h1>
+                <Chip size="sm" variant="flat" color="primary">{a.statoReg}</Chip>
+                <Chip size="sm" variant="dot" color={a.statoRegistrazione === 'Aperta' ? 'primary' : 'default'}>
+                  {a.statoRegistrazione}
                 </Chip>
               </div>
-              {assistenza.rifAssistenzaNome && (
-                <p className="text-sm text-default-400 mt-0.5">Rif. {assistenza.rifAssistenzaNome}</p>
+              {a.rifAssistenzaNome && (
+                <p className="text-sm text-default-400 mt-0.5">Rif. {a.rifAssistenzaNome}</p>
               )}
             </>
           )}
@@ -225,15 +226,15 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
               <div>
                 <span className="text-default-400 text-xs">NR</span>
-                <p className="font-medium">{assistenza.nr}</p>
+                <p className="font-medium">{a.nr}</p>
               </div>
               <div>
                 <span className="text-default-400 text-xs">Data</span>
-                <p>{assistenza.data ? new Date(assistenza.data).toLocaleDateString('it-IT') : '—'}</p>
+                <p>{a.data ? new Date(a.data).toLocaleDateString('it-IT') : '—'}</p>
               </div>
               <div>
                 <span className="text-default-400 text-xs">Rif. Assistenza</span>
-                <p>{assistenza.rifAssistenzaNome || '—'}</p>
+                <p>{a.rifAssistenzaNome || '—'}</p>
               </div>
             </div>
           </CardBody>
@@ -496,31 +497,21 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
               Apri
             </Button>
           </div>
-          {showMap && indirizzo.trim() && (
-            <div className="w-full rounded-lg overflow-hidden border border-[#168AAD]/20">
-              {mapCenter ? (
-                <iframe
-                  title="Mappa luogo assistenza"
-                  width="100%"
-                  height="300"
-                  style={{ border: 0 }}
-                  loading="lazy"
-                  referrerPolicy="no-referrer-when-downgrade"
-                  src={`https://www.openstreetmap.org/export/embed.html?bbox=${mapCenter.lng - 0.01},${mapCenter.lat - 0.005},${mapCenter.lng + 0.01},${mapCenter.lat + 0.005}&layer=mapnik&marker=${mapCenter.lat},${mapCenter.lng}`}
-                />
-              ) : (
-                <iframe
-                  title="Mappa luogo assistenza"
-                  width="100%"
-                  height="300"
-                  style={{ border: 0 }}
-                  loading="lazy"
-                  referrerPolicy="no-referrer-when-downgrade"
-                  src={`https://www.google.com/maps?q=${encodeURIComponent(indirizzo)}&output=embed`}
-                />
-              )}
-            </div>
-          )}
+          <div className="w-full rounded-lg overflow-hidden border border-[#168AAD]/20">
+            <iframe
+              key={mapCenter ? `${mapCenter.lat},${mapCenter.lng}` : 'world'}
+              title="Mappa luogo assistenza"
+              width="100%"
+              height="300"
+              style={{ border: 0 }}
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
+              src={mapCenter
+                ? `https://www.google.com/maps?q=${mapCenter.lat},${mapCenter.lng}&z=15&output=embed`
+                : `https://www.google.com/maps?ll=45.5877,10.1580&z=3&output=embed`
+              }
+            />
+          </div>
         </CardBody>
       </Card>
     </div>
