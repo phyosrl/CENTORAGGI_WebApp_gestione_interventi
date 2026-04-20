@@ -13,6 +13,7 @@ import {
 } from '@heroui/react';
 import { AssistenzaRegistrazione } from '../types/assistenzaRegistrazione';
 import { updateAssistenza, UpdateAssistenzaPayload, createAssistenza, CreateAssistenzaPayload, fetchAccounts, fetchRifAssistenze, fetchImages, uploadImage, deleteImage, Annotation } from '../services/api';
+import { getActiveTimer, removeActiveTimer, upsertActiveTimer } from '../services/timerStore';
 
 interface NominatimResult {
   place_id: number;
@@ -31,6 +32,9 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
   const assistenza = props.assistenza as AssistenzaRegistrazione | undefined;
   const a = assistenza!; // safe: used only when !isCreate
   const queryClient = useQueryClient();
+  const risorsaTimerId = assistenza?.risorsaId ?? ('risorsaId' in props ? props.risorsaId : null);
+  const timerKey = assistenza?.id ? `assistenza:${assistenza.id}` : `draft:${risorsaTimerId}`;
+  const existingTimer = getActiveTimer(timerKey);
 
   const [attne, setAttne] = useState(assistenza?.attne ?? '');
   const [oreIntervento, setOreIntervento] = useState(() => {
@@ -60,22 +64,53 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Timer state
-  const [timerRunning, setTimerRunning] = useState(false);
-  const [timerSeconds, setTimerSeconds] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // Timer logic
-  useEffect(() => {
-    if (timerRunning) {
-      timerRef.current = setInterval(() => {
-        setTimerSeconds((s) => s + 1);
-      }, 1000);
-    } else if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
+  const [timerStatus, setTimerStatus] = useState<'idle' | 'running' | 'paused' | 'stopped'>(existingTimer?.status ?? 'idle');
+  const [timerBaseSeconds, setTimerBaseSeconds] = useState<number>(existingTimer?.elapsedSeconds ?? 0);
+  const [timerStartedAt, setTimerStartedAt] = useState<number | null>(
+    existingTimer?.status === 'running' && existingTimer.startedAt != null ? existingTimer.startedAt : null
+  );
+  const [timerSeconds, setTimerSeconds] = useState<number>(() => {
+    if (existingTimer?.status === 'running' && existingTimer.startedAt != null) {
+      return existingTimer.elapsedSeconds + Math.max(0, Math.floor((Date.now() - existingTimer.startedAt) / 1000));
     }
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [timerRunning]);
+    return existingTimer?.elapsedSeconds ?? 0;
+  });
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timerRunning = timerStatus === 'running';
+
+  useEffect(() => {
+    if (timerStatus === 'running' && timerStartedAt != null) {
+      const updateSeconds = () => {
+        setTimerSeconds(timerBaseSeconds + Math.max(0, Math.floor((Date.now() - timerStartedAt) / 1000)));
+      };
+      updateSeconds();
+      timerRef.current = setInterval(updateSeconds, 1000);
+    } else {
+      setTimerSeconds(timerBaseSeconds);
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    }
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [timerBaseSeconds, timerStartedAt, timerStatus]);
+
+  const persistTimer = useCallback((status: 'running' | 'paused' | 'stopped', elapsedSeconds: number, startedAt: number | null) => {
+    upsertActiveTimer({
+      key: timerKey,
+      assistenzaId: assistenza?.id,
+      risorsaId: risorsaTimerId,
+      nr: assistenza?.nr || 'Nuova registrazione',
+      rifAssistenzaNome: assistenza?.rifAssistenzaNome || '',
+      tipologiaAssistenza: assistenza?.tipologiaAssistenza || tipologia || '',
+      startedAt,
+      elapsedSeconds,
+      status,
+    });
+  }, [assistenza?.id, assistenza?.nr, assistenza?.rifAssistenzaNome, assistenza?.tipologiaAssistenza, risorsaTimerId, timerKey, tipologia]);
 
   const timerDisplay = useMemo(() => {
     const h = Math.floor(timerSeconds / 3600);
@@ -84,13 +119,66 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   }, [timerSeconds]);
 
+  const handleStartTimer = useCallback(() => {
+    const startedAt = Date.now();
+    setTimerStatus('running');
+    setTimerStartedAt(startedAt);
+    persistTimer('running', timerBaseSeconds, startedAt);
+  }, [persistTimer, timerBaseSeconds]);
+
+  const handlePauseTimer = useCallback(() => {
+    const elapsed = timerStatus === 'running' && timerStartedAt != null
+      ? timerBaseSeconds + Math.max(0, Math.floor((Date.now() - timerStartedAt) / 1000))
+      : timerSeconds;
+
+    setTimerBaseSeconds(elapsed);
+    setTimerSeconds(elapsed);
+    setTimerStatus('paused');
+    setTimerStartedAt(null);
+    persistTimer('paused', elapsed, null);
+  }, [persistTimer, timerBaseSeconds, timerSeconds, timerStartedAt, timerStatus]);
+
+  const handleStopTimer = useCallback(() => {
+    const elapsed = timerStatus === 'running' && timerStartedAt != null
+      ? timerBaseSeconds + Math.max(0, Math.floor((Date.now() - timerStartedAt) / 1000))
+      : timerSeconds;
+
+    setTimerBaseSeconds(elapsed);
+    setTimerSeconds(elapsed);
+    setTimerStatus('stopped');
+    setTimerStartedAt(null);
+    persistTimer('stopped', elapsed, null);
+  }, [persistTimer, timerBaseSeconds, timerSeconds, timerStartedAt, timerStatus]);
+
+  const handleRestartTimer = useCallback(() => {
+    if (!window.confirm('Sei sicuro di voler riavviare il timer?')) return;
+    const startedAt = Date.now();
+    setTimerBaseSeconds(0);
+    setTimerSeconds(0);
+    setTimerStatus('running');
+    setTimerStartedAt(startedAt);
+    persistTimer('running', 0, startedAt);
+  }, [persistTimer]);
+
+  const handleClearTimer = useCallback(() => {
+    if (!window.confirm('Sei sicuro di voler eliminare i dati del timer?')) return;
+    setTimerBaseSeconds(0);
+    setTimerSeconds(0);
+    setTimerStatus('idle');
+    setTimerStartedAt(null);
+    setOreIntervento('');
+    removeActiveTimer(timerKey);
+    addToast({ title: 'Timer svuotato', color: 'success' });
+  }, [timerKey]);
+
   const applyTimerToOre = useCallback(() => {
     const h = Math.floor(timerSeconds / 3600);
     const m = Math.floor((timerSeconds % 3600) / 60);
     const s = timerSeconds % 60;
     setOreIntervento(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`);
-    setTimerRunning(false);
-  }, [timerSeconds]);
+    handleStopTimer();
+    addToast({ title: 'Tempo applicato', description: 'Ore intervento aggiornate con il timer', color: 'success' });
+  }, [handleStopTimer, timerSeconds]);
   const suggestionsRef = useRef<HTMLDivElement>(null);
 
   // Debounced Nominatim search
@@ -436,69 +524,99 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
         <CardBody className="gap-2.5 p-3">
           <p className="text-xs font-semibold text-[#184E77] uppercase tracking-wider">Dettagli registrazione</p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            <Input
-              label="Data"
-              value={data}
-              onValueChange={setData}
-              variant="bordered"
-              type="date"
-            />
-            {/* Ore Intervento + Timer */}
-            <div className="flex items-end gap-1.5">
+          <div className="grid grid-cols-1 lg:grid-cols-[0.8fr_1.2fr] gap-3 items-start">
+            <div className="space-y-2.5">
               <Input
-                label="Ore Intervento"
-                placeholder="00:00:00"
-                value={oreIntervento}
-                onValueChange={setOreIntervento}
+                label="Data"
+                value={data}
+                onValueChange={setData}
                 variant="bordered"
-                type="time"
-                className="flex-1 min-w-0"
-                size="sm"
-                step={1}
+                type="date"
               />
-              <div className="flex items-center gap-1 pb-1 shrink-0">
-                <div className={`font-mono text-xs tabular-nums rounded-md px-1 py-0.5 text-center whitespace-nowrap ${timerRunning ? 'bg-success-100 text-success-700' : 'bg-default-100'}`}>
-                  {timerDisplay}
+              <Input
+                label="Ore"
+                placeholder="0,00"
+                value={ore}
+                onValueChange={setOre}
+                variant="bordered"
+                type="text"
+                inputMode="decimal"
+              />
+              <Input
+                label="Totale"
+                placeholder="Inserisci totale..."
+                value={totale}
+                onValueChange={setTotale}
+                variant="bordered"
+                type="text"
+              />
+            </div>
+
+            <div className="rounded-2xl border border-[#168AAD]/20 bg-[#e8f4f8] p-2.5">
+              <div className="grid grid-cols-1 gap-2">
+                <Input
+                  label="Ore Intervento"
+                  placeholder="00:00:00"
+                  value={oreIntervento}
+                  onValueChange={setOreIntervento}
+                  variant="bordered"
+                  type="time"
+                  classNames={{ inputWrapper: 'bg-white' }}
+                  size="sm"
+                  step={1}
+                />
+
+                <div className="flex items-center justify-between gap-2 rounded-xl border border-default-200 bg-white px-3 py-2">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wider text-default-400">Timer</p>
+                    <p className={`font-mono text-lg font-bold ${
+                      timerStatus === 'running'
+                        ? 'text-emerald-600'
+                        : timerStatus === 'paused'
+                          ? 'text-amber-600'
+                          : 'text-slate-600'
+                    }`}>
+                      {timerDisplay}
+                    </p>
+                  </div>
+                  <Chip
+                    size="sm"
+                    variant="flat"
+                    color={timerStatus === 'running' ? 'success' : timerStatus === 'paused' ? 'warning' : 'default'}
+                  >
+                    {timerStatus === 'running' ? 'In corso' : timerStatus === 'paused' ? 'In pausa' : 'Fermo'}
+                  </Chip>
                 </div>
-                {!timerRunning ? (
-                  <Button size="sm" isIconOnly color="success" variant="flat" onPress={() => setTimerRunning(true)} aria-label="Avvia timer">
-                    ▶
+
+                <div className="flex items-center gap-1 w-full overflow-hidden">
+                  <Button size="sm" color="success" variant="flat" onPress={handleStartTimer} aria-label="Avvia timer" className="justify-center flex-1 basis-0 min-w-0 h-9 whitespace-nowrap text-[10px] sm:text-xs font-medium px-1 sm:px-1.5">
+                    ▶ Avvia
                   </Button>
-                ) : (
-                  <Button size="sm" isIconOnly color="danger" variant="flat" onPress={() => setTimerRunning(false)} aria-label="Pausa timer">
-                    ⏸
+                  <Button
+                    size="sm"
+                    variant="flat"
+                    onPress={handlePauseTimer}
+                    aria-label="Pausa timer"
+                    className="justify-center flex-1 basis-0 min-w-0 h-9 whitespace-nowrap text-[10px] sm:text-xs font-medium px-1 sm:px-1.5 bg-orange-100 text-orange-700 border border-orange-200 transition-all duration-150 focus:scale-105 active:scale-95 hover:animate-pulse focus:ring-2 focus:ring-orange-300"
+                    isDisabled={!timerRunning}
+                  >
+                    ⏸ Pausa
                   </Button>
-                )}
-                {timerSeconds > 0 && (
-                  <>
-                    <Button size="sm" isIconOnly color="primary" variant="flat" onPress={applyTimerToOre} aria-label="Applica ore">
-                      ✓
-                    </Button>
-                    <Button size="sm" isIconOnly variant="flat" onPress={() => { setTimerSeconds(0); setTimerRunning(false); }} aria-label="Reset timer">
-                      ↺
-                    </Button>
-                  </>
-                )}
+                  <Button size="sm" color="danger" variant="flat" onPress={handleStopTimer} aria-label="Ferma timer" className="justify-center flex-1 basis-0 min-w-0 h-9 whitespace-nowrap text-[10px] sm:text-xs font-medium px-1 sm:px-1.5 transition-all duration-150 focus:scale-105 active:scale-95 hover:animate-pulse focus:ring-2 focus:ring-rose-300" isDisabled={timerSeconds === 0}>
+                    ■ Stop
+                  </Button>
+                  <Button size="sm" color="primary" variant="flat" onPress={applyTimerToOre} aria-label="Conferma e compila ore intervento" className="justify-center flex-1 basis-0 min-w-0 h-9 whitespace-nowrap text-[10px] sm:text-xs font-medium px-1 sm:px-1.5 transition-all duration-150 focus:scale-105 active:scale-95 hover:animate-pulse focus:ring-2 focus:ring-sky-300" isDisabled={timerSeconds === 0}>
+                    ✓ Conferma
+                  </Button>
+                  <Button size="sm" color="secondary" variant="flat" onPress={handleRestartTimer} aria-label="Riavvia timer" className="justify-center flex-1 basis-0 min-w-0 h-9 whitespace-nowrap text-[10px] sm:text-xs font-medium px-1 sm:px-1.5 transition-all duration-150 focus:scale-105 active:scale-95 hover:animate-pulse focus:ring-2 focus:ring-cyan-300" isDisabled={timerSeconds === 0}>
+                    ↻ Riavvia
+                  </Button>
+                  <Button size="sm" variant="flat" onPress={handleClearTimer} aria-label="Elimina timer" className="justify-center flex-1 basis-0 min-w-0 h-9 whitespace-nowrap text-[10px] sm:text-xs font-medium px-1 sm:px-1.5 transition-all duration-150 focus:scale-105 active:scale-95 hover:animate-pulse focus:ring-2 focus:ring-gray-300" isDisabled={timerSeconds === 0}>
+                    🗑 Elimina
+                  </Button>
+                </div>
               </div>
             </div>
-            <Input
-              label="Ore"
-              placeholder="0,00"
-              value={ore}
-              onValueChange={setOre}
-              variant="bordered"
-              type="text"
-              inputMode="decimal"
-            />
-            <Input
-              label="Totale"
-              placeholder="Inserisci totale..."
-              value={totale}
-              onValueChange={setTotale}
-              variant="bordered"
-              type="text"
-            />
           </div>
 
           <Input

@@ -13,6 +13,7 @@ export interface AssistenzaRegistrazioneRaw {
   phyo_costoorario: number | null;
   phyo_totale: number | null;
   phyo_materialeutilizzato: string | null;
+  phyo_tipologia_assistenza?: string | number | null;
   _phyo_rifassistenza_value: string | null;
   _phyo_risorsa_value: string | null;
   statecode: number;
@@ -34,6 +35,7 @@ export interface AssistenzaRegistrazione {
   costoOrario: number | null;
   totale: number | null;
   materialeUtilizzato: string;
+  tipologiaAssistenza: string;
   rifAssistenzaId: string | null;
   rifAssistenzaNome: string;
   risorsaId: string | null;
@@ -59,6 +61,9 @@ export function mapAssistenzaRegistrazione(raw: AssistenzaRegistrazioneRaw): Ass
     costoOrario: raw.phyo_costoorario,
     totale: raw.phyo_totale,
     materialeUtilizzato: raw.phyo_materialeutilizzato ?? '',
+    tipologiaAssistenza:
+      raw['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue'] ??
+      (raw.phyo_tipologia_assistenza != null ? String(raw.phyo_tipologia_assistenza) : ''),
     rifAssistenzaId: raw._phyo_rifassistenza_value,
     rifAssistenzaNome:
       raw['_phyo_rifassistenza_value@OData.Community.Display.V1.FormattedValue'] ?? '',

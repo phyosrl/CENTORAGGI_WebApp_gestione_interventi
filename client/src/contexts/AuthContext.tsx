@@ -13,17 +13,23 @@ interface AuthContextValue extends AuthState {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
-
 const STORAGE_KEY = 'centoraggi_user';
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<AuthState>(() => {
+function readStoredUser(): LoginResponse | null {
+  try {
     const stored = sessionStorage.getItem(STORAGE_KEY);
-    return {
-      user: stored ? JSON.parse(stored) : null,
-      isLoading: false,
-      error: null,
-    };
+    return stored ? (JSON.parse(stored) as LoginResponse) : null;
+  } catch {
+    sessionStorage.removeItem(STORAGE_KEY);
+    return null;
+  }
+}
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [state, setState] = useState<AuthState>({
+    user: readStoredUser(),
+    isLoading: false,
+    error: null,
   });
 
   useEffect(() => {
@@ -34,14 +40,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [state.user]);
 
+  useEffect(() => {
+    const handleExpired = () => {
+      setState({ user: null, isLoading: false, error: 'Sessione scaduta. Effettua di nuovo l’accesso.' });
+    };
+
+    window.addEventListener('auth:expired', handleExpired as EventListener);
+    return () => window.removeEventListener('auth:expired', handleExpired as EventListener);
+  }, []);
+
   const login = useCallback(async (password: string) => {
     setState((s) => ({ ...s, isLoading: true, error: null }));
     try {
       const user = await loginRisorsa(password);
       setState({ user, isLoading: false, error: null });
     } catch (err: any) {
-      const message =
-        err?.response?.data?.error || 'Errore durante il login';
+      const message = err?.response?.data?.error || 'Errore durante il login';
       setState((s) => ({ ...s, isLoading: false, error: message }));
       throw err;
     }
@@ -51,11 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setState({ user: null, isLoading: false, error: null });
   }, []);
 
-  return (
-    <AuthContext.Provider value={{ ...state, login, logout }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={{ ...state, login, logout }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

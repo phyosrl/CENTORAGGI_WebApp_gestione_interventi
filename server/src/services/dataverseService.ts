@@ -14,6 +14,14 @@ export class DataverseService {
   private accessToken: string = '';
   private tokenExpiry: number = 0;
 
+  private sanitizeGuid(id: string): string {
+    const trimmed = id.trim();
+    if (!/^[0-9a-fA-F-]{36}$/.test(trimmed)) {
+      throw new Error('Invalid GUID value');
+    }
+    return trimmed;
+  }
+
   constructor(
     dataverseUrl: string,
     clientId: string,
@@ -195,6 +203,7 @@ export class DataverseService {
     'phyo_costoorario',
     'phyo_totale',
     'phyo_materialeutilizzato',
+    'phyo_tipologia_assistenza',
     '_phyo_rifassistenza_value',
     '_phyo_risorsa_value',
     'statecode'
@@ -202,19 +211,15 @@ export class DataverseService {
 
   async getAssistenze(risorsaId?: string): Promise<any[]> {
     const filter = risorsaId
-      ? `_phyo_risorsa_value eq ${risorsaId}`
+      ? `_phyo_risorsa_value eq ${this.sanitizeGuid(risorsaId)}`
       : undefined;
 
-    return this.query(
-      'phyo_assistenzeregistrazionis',
-      filter,
-      this.assistenzeSelect
-    );
+    return this.query('phyo_assistenzeregistrazionis', filter, this.assistenzeSelect);
   }
 
   async getAssistenzePaged(risorsaId?: string, pageSize?: number, skipToken?: string): Promise<{ data: any[]; totalCount: number; skipToken: string | null }> {
     const filter = risorsaId
-      ? `_phyo_risorsa_value eq ${risorsaId}`
+      ? `_phyo_risorsa_value eq ${this.sanitizeGuid(risorsaId)}`
       : undefined;
 
     return this.queryPaged('phyo_assistenzeregistrazionis', {
@@ -337,6 +342,26 @@ export class DataverseService {
       console.error('getNextAssistenzaNr failed:', error?.response?.data || error?.message);
       throw error;
     }
+  }
+
+  async userOwnsAssistenza(registrazioneId: string, risorsaId: string): Promise<boolean> {
+    const result = await this.query(
+      'phyo_assistenzeregistrazionis',
+      `phyo_assistenzeregistrazioniid eq ${this.sanitizeGuid(registrazioneId)} and _phyo_risorsa_value eq ${this.sanitizeGuid(risorsaId)}`,
+      ['phyo_assistenzeregistrazioniid']
+    );
+
+    return result.length > 0;
+  }
+
+  async getAnnotationParentRecordId(annotationId: string): Promise<string | null> {
+    const result = await this.query(
+      'annotations',
+      `annotationid eq ${this.sanitizeGuid(annotationId)}`,
+      ['annotationid', '_objectid_value']
+    );
+
+    return result[0]?._objectid_value ?? null;
   }
 
   async getAnnotations(registrazioneId: string): Promise<any[]> {

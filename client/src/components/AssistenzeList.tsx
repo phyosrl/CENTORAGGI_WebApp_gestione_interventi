@@ -210,6 +210,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
       (a) =>
         a.nr.toLowerCase().includes(q) ||
         a.rifAssistenzaNome.toLowerCase().includes(q) ||
+        a.tipologiaAssistenza.toLowerCase().includes(q) ||
         a.attne.toLowerCase().includes(q) ||
         a.descrizioneIntervento.toLowerCase().includes(q) ||
         a.materialeUtilizzato.toLowerCase().includes(q)
@@ -460,6 +461,14 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                           <p className="text-default-600">{formatDate(a.data)}</p>
                         </div>
                         <div>
+                          <span className="text-default-400 text-xs">Tipologia</span>
+                          <p className="text-default-600">{a.tipologiaAssistenza || '—'}</p>
+                        </div>
+                        <div>
+                          <span className="text-default-400 text-xs">Rif. Assistenza</span>
+                          <p className="text-default-600">{a.rifAssistenzaNome || '—'}</p>
+                        </div>
+                        <div>
                           <span className="text-default-400 text-xs">Att.ne</span>
                           <p className="text-default-600">{a.attne || '—'}</p>
                         </div>
@@ -528,6 +537,9 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                           <span className="font-mono text-xs text-white bg-[#34A0A4] px-2 py-0.5 rounded">
                             {a.nr}
                           </span>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-sm text-default-600">{a.tipologiaAssistenza || '—'}</span>
                         </TableCell>
                         <TableCell>
                           <span className="text-sm font-medium">{a.rifAssistenzaNome || '—'}</span>
@@ -655,6 +667,14 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                             <p className="font-medium tabular-nums">{formatNumber(a.ore)}</p>
                           </div>
                         </div>
+                        <div className="text-sm mt-1">
+                          <span className="text-default-400 text-xs">Rif. Assistenza</span>
+                          <p className="text-default-600">{a.rifAssistenzaNome || '—'}</p>
+                        </div>
+                        <div className="text-sm mt-1">
+                          <span className="text-default-400 text-xs">Tipologia</span>
+                          <p className="text-default-600">{a.tipologiaAssistenza || '—'}</p>
+                        </div>
                         {a.descrizioneIntervento && (
                           <div className="text-sm mt-1">
                             <span className="text-default-400 text-xs">Descrizione</span>
@@ -692,6 +712,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                         <TableColumn width={70} align="center">{''}</TableColumn>
                         <TableColumn width={110}>DATA</TableColumn>
                         <TableColumn width={90}>NR</TableColumn>
+                        <TableColumn minWidth={120}>TIPOLOGIA</TableColumn>
                         <TableColumn minWidth={100}>RIF. ASSISTENZA</TableColumn>
                         <TableColumn minWidth={90}>ATT.NE</TableColumn>
                         <TableColumn width={75} align="end">ORE INT.</TableColumn>
@@ -715,6 +736,9 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                               <span className="font-mono text-xs text-white bg-[#34A0A4] px-2 py-0.5 rounded">
                                 {a.nr}
                               </span>
+                            </TableCell>
+                            <TableCell>
+                              <span className="text-sm text-default-600">{a.tipologiaAssistenza || '—'}</span>
                             </TableCell>
                             <TableCell>
                               <span className="text-sm font-medium">{a.rifAssistenzaNome || '—'}</span>
@@ -840,6 +864,10 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                               <p className="font-medium tabular-nums">{formatNumber(a.ore)}</p>
                             </div>
                           </div>
+                          <div className="text-sm mt-1">
+                            <span className="text-default-400 text-xs">Tipologia</span>
+                            <p className="text-default-600">{a.tipologiaAssistenza || '—'}</p>
+                          </div>
                           {a.descrizioneIntervento && (
                             <div className="text-sm mt-1">
                               <span className="text-default-400 text-xs">Descrizione</span>
@@ -877,6 +905,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                           <TableColumn width={70} align="center">{''}</TableColumn>
                           <TableColumn width={110}>DATA</TableColumn>
                           <TableColumn width={90}>NR</TableColumn>
+                          <TableColumn minWidth={120}>TIPOLOGIA</TableColumn>
                           <TableColumn minWidth={100}>RIF. ASSISTENZA</TableColumn>
                           <TableColumn minWidth={90}>ATT.NE</TableColumn>
                           <TableColumn width={75} align="end">ORE INT.</TableColumn>
@@ -900,6 +929,9 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                                 <span className="font-mono text-xs text-white bg-[#34A0A4] px-2 py-0.5 rounded">
                                   {a.nr}
                                 </span>
+                              </TableCell>
+                              <TableCell>
+                                <span className="text-sm text-default-600">{a.tipologiaAssistenza || '—'}</span>
                               </TableCell>
                               <TableCell>
                                 <span className="text-sm font-medium">{a.rifAssistenzaNome || '—'}</span>

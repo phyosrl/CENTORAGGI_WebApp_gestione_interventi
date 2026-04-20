@@ -1,5 +1,6 @@
-import { app, HttpRequest, HttpResponseInit } from "@azure/functions";
-import { DataverseService } from "../../services/dataverseService.js";
+import { app, HttpRequest, HttpResponseInit } from '@azure/functions';
+import { DataverseService } from '../../services/dataverseService.js';
+import { issueSessionToken } from '../../services/auth.js';
 
 const dataverseService = new DataverseService(
   process.env.DATAVERSE_URL || '',
@@ -10,13 +11,13 @@ const dataverseService = new DataverseService(
 
 export async function login(request: HttpRequest): Promise<HttpResponseInit> {
   try {
-    const body = await request.json() as { password?: string };
-    const password = body?.password;
+    const body = (await request.json()) as { password?: string };
+    const password = body?.password?.trim();
 
-    if (!password || typeof password !== 'string') {
+    if (!password) {
       return {
         status: 400,
-        jsonBody: { error: 'Password richiesta' }
+        jsonBody: { error: 'Password richiesta' },
       };
     }
 
@@ -25,9 +26,14 @@ export async function login(request: HttpRequest): Promise<HttpResponseInit> {
     if (!risorsa) {
       return {
         status: 401,
-        jsonBody: { error: 'Codice non valido' }
+        jsonBody: { error: 'Codice non valido' },
       };
     }
+
+    const token = issueSessionToken({
+      id: risorsa.phyo_risorseid,
+      nome: risorsa.phyo_name,
+    });
 
     return {
       status: 200,
@@ -35,18 +41,20 @@ export async function login(request: HttpRequest): Promise<HttpResponseInit> {
         success: true,
         data: {
           id: risorsa.phyo_risorseid,
-          nome: risorsa.phyo_name
-        }
-      }
+          nome: risorsa.phyo_name,
+          token,
+          expiresAt: Date.now() + 12 * 60 * 60 * 1000,
+        },
+      },
     };
   } catch (error: any) {
-    console.error('Login error:', error.message);
+    console.error('Login error:', error?.message || error);
     return {
       status: 500,
       jsonBody: {
         error: 'Errore durante il login',
-        message: process.env.NODE_ENV === 'development' ? error.message : undefined
-      }
+        message: process.env.NODE_ENV === 'development' ? error?.message : undefined,
+      },
     };
   }
 }
@@ -55,5 +63,5 @@ app.http('login', {
   methods: ['POST'],
   authLevel: 'anonymous',
   route: 'auth/login',
-  handler: login
+  handler: login,
 });

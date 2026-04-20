@@ -2,10 +2,42 @@ import axios from 'axios';
 import { CommessaRaw } from '../types/commessa';
 import { AssistenzaRegistrazioneRaw } from '../types/assistenzaRegistrazione';
 
+const STORAGE_KEY = 'centoraggi_user';
+
 const api = axios.create({
   baseURL: '/api',
   timeout: 30000,
 });
+
+api.interceptors.request.use((config) => {
+  if (typeof window !== 'undefined') {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      try {
+        const user = JSON.parse(raw) as Partial<LoginResponse>;
+        if (user.token) {
+          config.headers = config.headers ?? {};
+          (config.headers as Record<string, string>).Authorization = `Bearer ${user.token}`;
+        }
+      } catch {
+        sessionStorage.removeItem(STORAGE_KEY);
+      }
+    }
+  }
+
+  return config;
+});
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (typeof window !== 'undefined' && error?.response?.status === 401) {
+      sessionStorage.removeItem(STORAGE_KEY);
+      window.dispatchEvent(new CustomEvent('auth:expired'));
+    }
+    return Promise.reject(error);
+  }
+);
 
 export async function fetchCommesse(): Promise<CommessaRaw[]> {
   const { data } = await api.get<{ success: boolean; data: CommessaRaw[] }>(
@@ -48,6 +80,8 @@ export async function fetchAssistenzeRegistrazioni(
 export interface LoginResponse {
   id: string;
   nome: string;
+  token: string;
+  expiresAt?: number;
 }
 
 export async function loginRisorsa(password: string): Promise<LoginResponse> {
