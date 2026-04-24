@@ -206,6 +206,7 @@ export class DataverseService {
     'phyo_tipologia_assistenza',
     '_phyo_rifassistenza_value',
     '_phyo_risorsa_value',
+    '_phyo_cliente_value',
     'statecode'
   ];
 
@@ -310,7 +311,7 @@ export class DataverseService {
     return this.query(
       'phyo_assistenzes',
       'statecode eq 0',
-      ['phyo_assistenzeid', 'phyo_nrassistenze', 'phyo_tipologia_assistenza', 'phyo_indirizzoassistenza']
+      ['phyo_assistenzeid', 'phyo_nrassistenze', 'phyo_tipologia_assistenza', 'phyo_indirizzoassistenza', '_phyo_cliente_value']
     );
   }
 

@@ -69,9 +69,23 @@ export default function ActiveTimersPanel() {
                       )}
                     </div>
 
-                    <span className="font-mono text-lg font-bold bg-warning-100 text-warning-800 rounded-lg px-4 py-2 shadow-sm min-w-[128px] text-center whitespace-nowrap">
-                      {formatTimerDuration(shownSeconds)}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-lg font-bold bg-warning-100 text-warning-800 rounded-lg px-4 py-2 shadow-sm min-w-[128px] text-center whitespace-nowrap">
+                        {formatTimerDuration(shownSeconds)}
+                      </span>
+                      <Button
+                        size="sm"
+                        color="primary"
+                        variant="solid"
+                        className="ml-1 animate-pulse-once"
+                        onPress={() => {
+                          addToast({ title: 'Salvato', color: 'success' });
+                        }}
+                        aria-label="Salva registrazione"
+                      >
+                        💾 Salva
+                      </Button>
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-1 w-full overflow-hidden">

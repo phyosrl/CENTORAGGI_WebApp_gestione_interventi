@@ -52,9 +52,9 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
   const [materiale, setMateriale] = useState(assistenza?.materialeUtilizzato ?? '');
   const [totale, setTotale] = useState(assistenza?.totale != null ? String(assistenza.totale) : '');
   const [data, setData] = useState(assistenza?.data ? assistenza.data.split('T')[0] : new Date().toISOString().split('T')[0]);
-  const [clienteId, setClienteId] = useState('');
+  const [clienteId, setClienteId] = useState(assistenza?.clienteId ?? '');
   const [rifAssistenzaId, setRifAssistenzaId] = useState(assistenza?.rifAssistenzaId ?? '');
-  const [tipologia, setTipologia] = useState('');
+  const [tipologia, setTipologia] = useState(assistenza?.tipologiaAssistenza ?? '');
   const [indirizzo, setIndirizzo] = useState('');
   const [showMap, setShowMap] = useState(false);
   const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number } | null>(null);
@@ -288,25 +288,50 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
     }
   }, [refetchImages]);
 
-  // Extract unique tipologie from rifAssistenzeList
+  // Tipologie filtered by selected cliente / rif
   const tipologie = useMemo(() => {
     if (!rifAssistenzeList) return [];
     const set = new Set<string>();
     for (const rif of rifAssistenzeList) {
+      if (clienteId && rif._phyo_cliente_value !== clienteId) continue;
+      if (rifAssistenzaId && rif.phyo_assistenzeid !== rifAssistenzaId) continue;
       const t = rif['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue'] || '';
       if (t) set.add(t);
     }
+    // always include currently selected tipologia
+    if (tipologia) set.add(tipologia);
     return Array.from(set).sort();
-  }, [rifAssistenzeList]);
+  }, [rifAssistenzeList, clienteId, rifAssistenzaId, tipologia]);
 
-  // Filter rif assistenze by selected tipologia
+  // Clienti filtered by selected tipologia / rif
+  const filteredAccounts = useMemo(() => {
+    if (!accountsList) return [];
+    if (!rifAssistenzeList || (!tipologia && !rifAssistenzaId)) return accountsList;
+    const allowed = new Set<string>();
+    for (const rif of rifAssistenzeList) {
+      if (tipologia && (rif['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue'] || '') !== tipologia) continue;
+      if (rifAssistenzaId && rif.phyo_assistenzeid !== rifAssistenzaId) continue;
+      if (rif._phyo_cliente_value) allowed.add(rif._phyo_cliente_value);
+    }
+    // always include currently selected cliente
+    if (clienteId) allowed.add(clienteId);
+    return accountsList.filter((a) => allowed.has(a.accountid));
+  }, [accountsList, rifAssistenzeList, tipologia, rifAssistenzaId, clienteId]);
+
+  // Filter rif assistenze by selected cliente and tipologia
   const filteredRifAssistenze = useMemo(() => {
     if (!rifAssistenzeList) return [];
-    if (!tipologia) return rifAssistenzeList;
-    return rifAssistenzeList.filter(
-      (rif) => (rif['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue'] || '') === tipologia
-    );
-  }, [rifAssistenzeList, tipologia]);
+    let list = rifAssistenzeList;
+    if (clienteId) {
+      list = list.filter((rif) => rif._phyo_cliente_value === clienteId);
+    }
+    if (tipologia) {
+      list = list.filter(
+        (rif) => (rif['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue'] || '') === tipologia
+      );
+    }
+    return list;
+  }, [rifAssistenzeList, clienteId, tipologia]);
 
   const updateMutation = useMutation({
     mutationFn: (payload: UpdateAssistenzaPayload) =>
@@ -458,11 +483,18 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
               onSelectionChange={(keys) => {
                 const selected = Array.from(keys)[0] as string | undefined;
                 setClienteId(selected ?? '');
+                // if current rif no longer matches cliente, clear it
+                if (selected && rifAssistenzaId && rifAssistenzeList) {
+                  const rif = rifAssistenzeList.find((r) => r.phyo_assistenzeid === rifAssistenzaId);
+                  if (rif && rif._phyo_cliente_value !== selected) {
+                    setRifAssistenzaId('');
+                  }
+                }
               }}
               className="sm:col-span-2"
               classNames={{ trigger: 'bg-white' }}
             >
-              {(accountsList ?? []).map((acc) => (
+              {filteredAccounts.map((acc) => (
                 <SelectItem key={acc.accountid}>
                   {acc.name}
                 </SelectItem>
@@ -476,7 +508,14 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
               onSelectionChange={(keys) => {
                 const selected = Array.from(keys)[0] as string | undefined;
                 setTipologia(selected ?? '');
-                setRifAssistenzaId('');
+                // if current rif no longer matches tipologia, clear it
+                if (selected && rifAssistenzaId && rifAssistenzeList) {
+                  const rif = rifAssistenzeList.find((r) => r.phyo_assistenzeid === rifAssistenzaId);
+                  const rifTip = rif?.['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue'] || '';
+                  if (rif && rifTip !== selected) {
+                    setRifAssistenzaId('');
+                  }
+                }
               }}
               className="sm:col-span-2"
               classNames={{ trigger: 'bg-white' }}
@@ -489,20 +528,28 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
             </Select>
             <Select
               label="Rif. Assistenza"
-              placeholder={tipologia ? 'Seleziona assistenza...' : 'Seleziona prima la tipologia...'}
+              placeholder="Seleziona assistenza..."
               variant="bordered"
               selectedKeys={rifAssistenzaId ? [rifAssistenzaId] : []}
-              isDisabled={!tipologia}
               onSelectionChange={(keys) => {
                 const selected = Array.from(keys)[0] as string | undefined;
                 setRifAssistenzaId(selected ?? '');
-                // Auto-populate indirizzo from selected assistenza
                 if (selected && rifAssistenzeList) {
                   const rif = rifAssistenzeList.find((r) => r.phyo_assistenzeid === selected);
-                  if (rif?.phyo_indirizzoassistenza) {
-                    setIndirizzo(rif.phyo_indirizzoassistenza);
-                    setShowMap(false);
-                    setMapCenter(null);
+                  if (rif) {
+                    // auto-populate cliente and tipologia from the selected rif
+                    if (rif._phyo_cliente_value) {
+                      setClienteId(rif._phyo_cliente_value);
+                    }
+                    const rifTip = rif['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue'] || '';
+                    if (rifTip) {
+                      setTipologia(rifTip);
+                    }
+                    if (rif.phyo_indirizzoassistenza) {
+                      setIndirizzo(rif.phyo_indirizzoassistenza);
+                      setShowMap(false);
+                      setMapCenter(null);
+                    }
                   }
                 }
               }}
@@ -510,8 +557,16 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
               classNames={{ trigger: 'bg-white' }}
             >
               {filteredRifAssistenze.map((rif) => (
-                <SelectItem key={rif.phyo_assistenzeid}>
-                  {rif.phyo_nrassistenze}
+                <SelectItem key={rif.phyo_assistenzeid} textValue={rif.phyo_nrassistenze}>
+                  <div className="flex flex-col">
+                    <span>{rif.phyo_nrassistenze}</span>
+                    <span className="text-tiny text-default-400">
+                      {rif['_phyo_cliente_value@OData.Community.Display.V1.FormattedValue'] || ''}
+                      {rif['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue']
+                        ? ` • ${rif['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue']}`
+                        : ''}
+                    </span>
+                  </div>
                 </SelectItem>
               ))}
             </Select>

@@ -54,7 +54,7 @@ const tipologiaColorMap: Record<string, 'primary' | 'secondary' | 'success' | 'w
 
 export default function CommesseList() {
   const [search, setSearch] = useState('');
-  const [tipologiaFilter, setTipologiaFilter] = useState<string>('');
+  const [tipologiaFilter, setTipologiaFilter] = useState<Set<string>>(new Set());
   const [statoFilter, setStatoFilter] = useState<string>('');
 
   const { data: rawData, isLoading, error, refetch } = useQuery<CommessaRaw[]>({
@@ -91,9 +91,9 @@ export default function CommesseList() {
       );
     }
 
-    if (tipologiaFilter) {
+    if (tipologiaFilter.size > 0) {
       result = result.filter(
-        (c) => c.tipologiaValue != null && c.tipologiaValue.toString() === tipologiaFilter
+        (c) => c.tipologiaValue != null && tipologiaFilter.has(c.tipologiaValue.toString())
       );
     }
 
@@ -104,11 +104,11 @@ export default function CommesseList() {
     return result;
   }, [commesse, search, tipologiaFilter, statoFilter]);
 
-  const hasFilters = search || tipologiaFilter || statoFilter;
+  const hasFilters = search || tipologiaFilter.size > 0 || statoFilter;
 
   const clearFilters = useCallback(() => {
     setSearch('');
-    setTipologiaFilter('');
+    setTipologiaFilter(new Set());
     setStatoFilter('');
   }, []);
 
@@ -191,17 +191,20 @@ export default function CommesseList() {
             <Select
               label="Tipologia"
               placeholder="Tutte"
-              selectedKeys={tipologiaFilter ? [tipologiaFilter] : []}
-              onSelectionChange={(keys) => {
-                const val = Array.from(keys)[0] as string | undefined;
-                setTipologiaFilter(val ?? '');
-              }}
+              selectionMode="multiple"
+              selectedKeys={tipologiaFilter}
+              onSelectionChange={(keys) => setTipologiaFilter(new Set(Array.from(keys as Set<string>)))}
               className="lg:w-56"
               variant="bordered"
               size="sm"
+              renderValue={(items) => {
+                if (items.length === 0) return <span className="text-default-400">Tutte</span>;
+                if (items.length === 1) return <span className="truncate">{items[0].textValue ?? items[0].key}</span>;
+                return <span>{items.length} tipologie</span>;
+              }}
             >
               {tipologiaOptions.map((opt) => (
-                <SelectItem key={opt.value}>{opt.label}</SelectItem>
+                <SelectItem key={opt.value} textValue={opt.label}>{opt.label}</SelectItem>
               ))}
             </Select>
             <Select

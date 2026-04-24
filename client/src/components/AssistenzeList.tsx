@@ -17,6 +17,8 @@ import {
   DropdownTrigger,
   DropdownMenu,
   DropdownItem,
+  Select,
+  SelectItem,
   addToast,
 } from '@heroui/react';
 import { fetchAssistenzeRegistrazioni, updateAssistenza } from '../services/api';
@@ -85,6 +87,7 @@ const PAGE_SIZE = 20;
 
 export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: AssistenzeListProps) {
   const [search, setSearch] = useState('');
+  const [tipologiaFilter, setTipologiaFilter] = useState<Set<string>>(new Set());
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<'global' | 'grouped' | 'manutenzioni'>('grouped');
   const [loadingAll, setLoadingAll] = useState(false);
@@ -203,19 +206,32 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
     return rawData.map(mapAssistenzaRegistrazione);
   }, [rawData]);
 
+  const tipologiaOptions = useMemo(() => {
+    const set = new Set<string>();
+    assistenze.forEach((a) => {
+      if (a.tipologiaAssistenza) set.add(a.tipologiaAssistenza);
+    });
+    return Array.from(set).sort();
+  }, [assistenze]);
+
   const filtered = useMemo(() => {
-    if (!search) return assistenze;
+    let result = assistenze;
+    if (tipologiaFilter.size > 0) {
+      result = result.filter((a) => tipologiaFilter.has(a.tipologiaAssistenza));
+    }
+    if (!search) return result;
     const q = search.toLowerCase();
-    return assistenze.filter(
+    return result.filter(
       (a) =>
         a.nr.toLowerCase().includes(q) ||
         a.rifAssistenzaNome.toLowerCase().includes(q) ||
+        a.clienteNome.toLowerCase().includes(q) ||
         a.tipologiaAssistenza.toLowerCase().includes(q) ||
         a.attne.toLowerCase().includes(q) ||
         a.descrizioneIntervento.toLowerCase().includes(q) ||
         a.materialeUtilizzato.toLowerCase().includes(q)
     );
-  }, [assistenze, search]);
+  }, [assistenze, search, tipologiaFilter]);
 
   const globalFiltered = useMemo(() => {
     return filtered
@@ -395,6 +411,35 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
             </svg>
           }
         />
+        <Select
+          aria-label="Filtra per tipologia"
+          placeholder="Tipologia"
+          selectionMode="multiple"
+          selectedKeys={tipologiaFilter}
+          onSelectionChange={(keys) => setTipologiaFilter(new Set(Array.from(keys as Set<string>)))}
+          className="sm:w-56"
+          variant="bordered"
+          size="sm"
+          renderValue={(items) => {
+            if (items.length === 0) return <span className="text-default-400">Tipologia</span>;
+            if (items.length === 1) return <span className="truncate">{items[0].textValue ?? items[0].key}</span>;
+            return <span>{items.length} tipologie</span>;
+          }}
+        >
+          {tipologiaOptions.map((t) => (
+            <SelectItem key={t} textValue={t}>{t}</SelectItem>
+          ))}
+        </Select>
+        {tipologiaFilter.size > 0 && (
+          <Button
+            size="sm"
+            variant="flat"
+            color="danger"
+            onPress={() => setTipologiaFilter(new Set())}
+          >
+            Reset tipologia
+          </Button>
+        )}
         {(viewMode === 'grouped' || viewMode === 'manutenzioni') && (
           <div className="flex gap-2">
             <Button size="sm" variant="flat" onPress={expandAll}>
@@ -461,6 +506,10 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                           <p className="text-default-600">{formatDate(a.data)}</p>
                         </div>
                         <div>
+                          <span className="text-default-400 text-xs">Cliente</span>
+                          <p className="text-default-600">{a.clienteNome || '—'}</p>
+                        </div>
+                        <div>
                           <span className="text-default-400 text-xs">Tipologia</span>
                           <p className="text-default-600">{a.tipologiaAssistenza || '—'}</p>
                         </div>
@@ -513,13 +562,14 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                     <TableColumn width={70} align="center">{''}</TableColumn>
                     <TableColumn width={110}>DATA</TableColumn>
                     <TableColumn width={90}>NR</TableColumn>
+                    <TableColumn minWidth={120}>CLIENTE</TableColumn>
+                    <TableColumn minWidth={120}>TIPOLOGIA</TableColumn>
                     <TableColumn minWidth={100}>RIF. ASSISTENZA</TableColumn>
                     <TableColumn width={110}>STATO REG</TableColumn>
                     <TableColumn minWidth={90}>ATT.NE</TableColumn>
                     <TableColumn width={75} align="end">ORE INT.</TableColumn>
                     <TableColumn width={65} align="end">ORE</TableColumn>
                     <TableColumn minWidth={130}>DESCRIZIONE</TableColumn>
-                    <TableColumn minWidth={90}>MATERIALE</TableColumn>
                     <TableColumn width={90} align="end">TOTALE</TableColumn>
                   </TableHeader>
                   <TableBody>
@@ -537,6 +587,9 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                           <span className="font-mono text-xs text-white bg-[#34A0A4] px-2 py-0.5 rounded">
                             {a.nr}
                           </span>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-sm font-medium">{a.clienteNome || '—'}</span>
                         </TableCell>
                         <TableCell>
                           <span className="text-sm text-default-600">{a.tipologiaAssistenza || '—'}</span>
@@ -559,11 +612,6 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                         <TableCell>
                           <p className="text-sm text-default-600 truncate max-w-[200px]" title={a.descrizioneIntervento}>
                             {a.descrizioneIntervento || '—'}
-                          </p>
-                        </TableCell>
-                        <TableCell>
-                          <p className="text-sm text-default-600 truncate max-w-[150px]" title={a.materialeUtilizzato}>
-                            {a.materialeUtilizzato || '—'}
                           </p>
                         </TableCell>
                         <TableCell>
@@ -712,13 +760,13 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                         <TableColumn width={70} align="center">{''}</TableColumn>
                         <TableColumn width={110}>DATA</TableColumn>
                         <TableColumn width={90}>NR</TableColumn>
+                        <TableColumn minWidth={120}>CLIENTE</TableColumn>
                         <TableColumn minWidth={120}>TIPOLOGIA</TableColumn>
                         <TableColumn minWidth={100}>RIF. ASSISTENZA</TableColumn>
                         <TableColumn minWidth={90}>ATT.NE</TableColumn>
                         <TableColumn width={75} align="end">ORE INT.</TableColumn>
                         <TableColumn width={65} align="end">ORE</TableColumn>
                         <TableColumn minWidth={130}>DESCRIZIONE</TableColumn>
-                        <TableColumn minWidth={90}>MATERIALE</TableColumn>
                         <TableColumn width={90} align="end">TOTALE</TableColumn>
                       </TableHeader>
                       <TableBody>
@@ -738,6 +786,9 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                               </span>
                             </TableCell>
                             <TableCell>
+                              <span className="text-sm font-medium">{a.clienteNome || '—'}</span>
+                            </TableCell>
+                            <TableCell>
                               <span className="text-sm text-default-600">{a.tipologiaAssistenza || '—'}</span>
                             </TableCell>
                             <TableCell>
@@ -755,11 +806,6 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                             <TableCell>
                               <p className="text-sm text-default-600 truncate max-w-[200px]" title={a.descrizioneIntervento}>
                                 {a.descrizioneIntervento || '—'}
-                              </p>
-                            </TableCell>
-                            <TableCell>
-                              <p className="text-sm text-default-600 truncate max-w-[150px]" title={a.materialeUtilizzato}>
-                                {a.materialeUtilizzato || '—'}
                               </p>
                             </TableCell>
                             <TableCell>
@@ -905,13 +951,13 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                           <TableColumn width={70} align="center">{''}</TableColumn>
                           <TableColumn width={110}>DATA</TableColumn>
                           <TableColumn width={90}>NR</TableColumn>
+                          <TableColumn minWidth={120}>CLIENTE</TableColumn>
                           <TableColumn minWidth={120}>TIPOLOGIA</TableColumn>
                           <TableColumn minWidth={100}>RIF. ASSISTENZA</TableColumn>
                           <TableColumn minWidth={90}>ATT.NE</TableColumn>
                           <TableColumn width={75} align="end">ORE INT.</TableColumn>
                           <TableColumn width={65} align="end">ORE</TableColumn>
                           <TableColumn minWidth={130}>DESCRIZIONE</TableColumn>
-                          <TableColumn minWidth={90}>MATERIALE</TableColumn>
                           <TableColumn width={90} align="end">TOTALE</TableColumn>
                         </TableHeader>
                         <TableBody>
@@ -931,6 +977,9 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                                 </span>
                               </TableCell>
                               <TableCell>
+                                <span className="text-sm font-medium">{a.clienteNome || '—'}</span>
+                              </TableCell>
+                              <TableCell>
                                 <span className="text-sm text-default-600">{a.tipologiaAssistenza || '—'}</span>
                               </TableCell>
                               <TableCell>
@@ -948,11 +997,6 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                               <TableCell>
                                 <p className="text-sm text-default-600 truncate max-w-[200px]" title={a.descrizioneIntervento}>
                                   {a.descrizioneIntervento || '—'}
-                                </p>
-                              </TableCell>
-                              <TableCell>
-                                <p className="text-sm text-default-600 truncate max-w-[150px]" title={a.materialeUtilizzato}>
-                                  {a.materialeUtilizzato || '—'}
                                 </p>
                               </TableCell>
                               <TableCell>

@@ -132,7 +132,9 @@ export interface RifAssistenza {
   phyo_nrassistenze: string;
   phyo_tipologia_assistenza: string | null;
   phyo_indirizzoassistenza: string | null;
+  _phyo_cliente_value?: string | null;
   ['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue']?: string;
+  ['_phyo_cliente_value@OData.Community.Display.V1.FormattedValue']?: string;
 }
 
 export async function fetchRifAssistenze(): Promise<RifAssistenza[]> {

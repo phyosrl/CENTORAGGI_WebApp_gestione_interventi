@@ -16,6 +16,7 @@ export interface AssistenzaRegistrazioneRaw {
   phyo_tipologia_assistenza?: string | number | null;
   _phyo_rifassistenza_value: string | null;
   _phyo_risorsa_value: string | null;
+  _phyo_cliente_value: string | null;
   statecode: number;
   [key: `${string}@OData.Community.Display.V1.FormattedValue`]: string;
 }
@@ -40,6 +41,8 @@ export interface AssistenzaRegistrazione {
   rifAssistenzaNome: string;
   risorsaId: string | null;
   risorsaNome: string;
+  clienteId: string | null;
+  clienteNome: string;
   attivo: boolean;
 }
 
@@ -70,6 +73,9 @@ export function mapAssistenzaRegistrazione(raw: AssistenzaRegistrazioneRaw): Ass
     risorsaId: raw._phyo_risorsa_value,
     risorsaNome:
       raw['_phyo_risorsa_value@OData.Community.Display.V1.FormattedValue'] ?? '',
+    clienteId: raw._phyo_cliente_value,
+    clienteNome:
+      raw['_phyo_cliente_value@OData.Community.Display.V1.FormattedValue'] ?? '',
     attivo: raw.statecode === 0,
   };
 }
