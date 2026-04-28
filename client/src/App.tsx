@@ -1,8 +1,10 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { HeroUIProvider, ToastProvider } from '@heroui/react';
 import { Navbar, NavbarBrand, NavbarContent, Button } from '@heroui/react';
+import { AnimatePresence, motion } from 'framer-motion';
 import AssistenzeList from './components/AssistenzeList';
 import AssistenzaEdit from './components/AssistenzaEdit';
+import CalendarPage from './components/CalendarPage';
 import LoginPage from './components/LoginPage';
 import ErrorBoundary from './components/ErrorBoundary';
 import ActiveTimersPanel from './components/ActiveTimersPanel';
@@ -10,11 +12,12 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AssistenzaRegistrazione } from './types/assistenzaRegistrazione';
 import { getActiveTimers } from './services/timerStore';
 
-type View = { type: 'list' } | { type: 'edit'; assistenza: AssistenzaRegistrazione } | { type: 'create' };
+type View = { type: 'calendar' } | { type: 'list' } | { type: 'edit'; assistenza: AssistenzaRegistrazione } | { type: 'create' };
 
 function AppContent() {
   const { user, logout } = useAuth();
-  const [view, setView] = useState<View>({ type: 'list' });
+  const [view, setView] = useState<View>({ type: 'calendar' });
+  const [previousView, setPreviousView] = useState<'calendar' | 'list'>('calendar');
   const [isOnline, setIsOnline] = useState(typeof window === 'undefined' ? true : window.navigator.onLine);
 
   useEffect(() => {
@@ -42,14 +45,26 @@ function AppContent() {
   }, []);
 
   const handleOpen = useCallback((a: AssistenzaRegistrazione) => {
+    setPreviousView((prev) => (view.type === 'calendar' || view.type === 'list' ? view.type : prev));
     setView({ type: 'edit', assistenza: a });
-  }, []);
+  }, [view]);
 
   const handleCreateNew = useCallback(() => {
+    setPreviousView((prev) => (view.type === 'calendar' || view.type === 'list' ? view.type : prev));
     setView({ type: 'create' });
-  }, []);
+  }, [view]);
 
   const handleBack = useCallback(() => {
+    setView({ type: previousView });
+  }, [previousView]);
+
+  const handleShowCalendar = useCallback(() => {
+    setPreviousView('calendar');
+    setView({ type: 'calendar' });
+  }, []);
+
+  const handleShowList = useCallback(() => {
+    setPreviousView('list');
     setView({ type: 'list' });
   }, []);
 
@@ -58,7 +73,7 @@ function AppContent() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-centoraggi-bg-start to-centoraggi-bg-end">
+    <div className="min-h-screen bg-[#E7ECEF]">
       {/* Watermark fisso: rosa dei venti Centoraggi */}
       <div
         aria-hidden="true"
@@ -81,7 +96,7 @@ function AppContent() {
         maxWidth="full"
         isBordered
         height="4.5rem"
-        className="relative overflow-hidden bg-[#38373B] backdrop-blur-md shadow-sm"
+        className="sticky top-0 z-40 overflow-hidden bg-[#38373B] backdrop-blur-md shadow-sm"
         classNames={{ wrapper: 'px-0 pr-2 sm:pr-3 max-w-full h-full' }}
       >
         <NavbarBrand className="flex-grow-0 pl-0 h-full min-w-0">
@@ -98,6 +113,24 @@ function AppContent() {
           <span className="text-base sm:text-lg font-semibold text-white">Gestione Assistenze</span>
         </div>
         <NavbarContent justify="end" className="gap-1 sm:gap-2">
+          <Button
+            size="sm"
+            variant={view.type === 'calendar' ? 'solid' : 'flat'}
+            color={view.type === 'calendar' ? 'primary' : undefined}
+            className="min-w-[88px]"
+            onPress={handleShowCalendar}
+          >
+            Calendario
+          </Button>
+          <Button
+            size="sm"
+            variant={view.type === 'list' ? 'solid' : 'flat'}
+            color={view.type === 'list' ? 'primary' : undefined}
+            className="min-w-[88px]"
+            onPress={handleShowList}
+          >
+            Elenco
+          </Button>
           <div className="hidden md:block text-right">
             <p className="text-sm font-medium text-white">Ciao, {user.nome}!</p>
             <p className="text-tiny text-centoraggi-mint hidden sm:block">Bentornato</p>
@@ -110,13 +143,49 @@ function AppContent() {
 
       <main className="max-w-[1400px] mx-auto px-3 sm:px-6 py-4 sm:py-8">
         <ActiveTimersPanel />
-        {view.type === 'edit' ? (
-          <AssistenzaEdit assistenza={view.assistenza} onBack={handleBack} />
-        ) : view.type === 'create' ? (
-          <AssistenzaEdit risorsaId={user.id} onBack={handleBack} />
-        ) : (
-          <AssistenzeList risorsaId={user.id} onOpen={handleOpen} onCreateNew={handleCreateNew} />
-        )}
+        <AnimatePresence mode="wait" initial={false}>
+          {view.type === 'edit' ? (
+            <motion.div
+              key={`edit-${view.assistenza.id ?? 'new'}`}
+              initial={{ opacity: 0, x: 24 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -24 }}
+              transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <AssistenzaEdit assistenza={view.assistenza} onBack={handleBack} />
+            </motion.div>
+          ) : view.type === 'create' ? (
+            <motion.div
+              key="create"
+              initial={{ opacity: 0, x: 24 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -24 }}
+              transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <AssistenzaEdit risorsaId={user.id} onBack={handleBack} />
+            </motion.div>
+          ) : view.type === 'list' ? (
+            <motion.div
+              key="list"
+              initial={{ opacity: 0, x: -24 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 24 }}
+              transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <AssistenzeList risorsaId={user.id} onOpen={handleOpen} onCreateNew={handleCreateNew} />
+            </motion.div>
+          ) : (
+            <motion.div
+              key="calendar"
+              initial={{ opacity: 0, x: -24 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 24 }}
+              transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <CalendarPage risorsaId={user.id} onOpen={handleOpen} onCreateNew={handleCreateNew} />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </main>
       </div>
     </div>

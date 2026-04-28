@@ -70,6 +70,7 @@ const ALLOWED_FIELDS = new Set([
   'phyo_totale',
   '_phyo_rifassistenza_value',
   '_phyo_cliente_value',
+  'phyo_tipologia_assistenza',
   'phyo_statoreg',
   'phyo_data',
 ]);
@@ -146,6 +147,7 @@ const CREATE_ALLOWED_FIELDS = new Set([
   'phyo_data',
   '_phyo_rifassistenza_value',
   '_phyo_cliente_value',
+  'phyo_tipologia_assistenza',
 ]);
 
 export async function createAssistenza(request: HttpRequest): Promise<HttpResponseInit> {

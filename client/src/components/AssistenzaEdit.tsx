@@ -5,10 +5,6 @@ import {
   ArrowUp,
   MapPin,
   ExternalLink,
-  Image as ImageIcon,
-  Camera,
-  Upload,
-  X,
   Play,
   Pause,
   Square,
@@ -29,14 +25,22 @@ import {
   addToast,
 } from '@heroui/react';
 import { AssistenzaRegistrazione } from '../types/assistenzaRegistrazione';
-import { updateAssistenza, UpdateAssistenzaPayload, createAssistenza, CreateAssistenzaPayload, fetchAccounts, fetchRifAssistenze, fetchImages, uploadImage, deleteImage, Annotation } from '../services/api';
+import { updateAssistenza, UpdateAssistenzaPayload, createAssistenza, CreateAssistenzaPayload, fetchAccounts, fetchRifAssistenze, fetchImages, uploadImage, deleteImage, Annotation, geocodeAddress, GeocodeResult } from '../services/api';
 import { getActiveTimer, removeActiveTimer, upsertActiveTimer } from '../services/timerStore';
+import AssistenzaImagesSection from './assistenza/AssistenzaImagesSection';
 
-interface NominatimResult {
-  place_id: number;
-  display_name: string;
-  lat: string;
-  lon: string;
+type NominatimResult = GeocodeResult;
+
+function formatGeocode(r: GeocodeResult): { primary: string; secondary: string } {
+  const a = r.address || {};
+  const street = a.road || a.pedestrian || '';
+  const number = a.house_number || '';
+  const city = a.city || a.town || a.village || a.municipality || '';
+  const postcode = a.postcode || '';
+  const province = a.county || a.state || '';
+  const primary = [street && number ? `${street}, ${number}` : street].filter(Boolean).join('') || r.display_name.split(',')[0];
+  const secondary = [postcode, city, province].filter(Boolean).join(' ') || r.display_name.split(',').slice(1).join(',').trim();
+  return { primary, secondary };
 }
 
 type AssistenzaEditProps =
@@ -203,17 +207,13 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
   }, [handleStopTimer, timerSeconds]);
   const suggestionsRef = useRef<HTMLDivElement>(null);
 
-  // Debounced Nominatim search
+  // Debounced address search via backend geocoding proxy (cache + rate limit server-side)
   const searchAddress = useCallback((query: string) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (query.length < 3) { setSuggestions([]); return; }
     debounceRef.current = setTimeout(async () => {
       try {
-        const res = await fetch(
-          `https://nominatim.openstreetmap.org/search?format=json&countrycodes=it&limit=5&q=${encodeURIComponent(query)}`,
-          { headers: { 'Accept-Language': 'it' } }
-        );
-        const data: NominatimResult[] = await res.json();
+        const data = await geocodeAddress(query);
         setSuggestions(data);
       } catch { setSuggestions([]); }
     }, 350);
@@ -243,6 +243,27 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
     staleTime: 10 * 60 * 1000,
   });
 
+  // Auto-popola cliente / tipologia / indirizzo dal Rif. Assistenza collegato
+  // quando si apre una registrazione: se la registrazione ha un riferimento ma
+  // i campi derivati sono vuoti (o l'indirizzo non è ancora stato caricato),
+  // sincronizziamo i dati dal record linkato non appena la lista è disponibile.
+  useEffect(() => {
+    if (!rifAssistenzeList || !rifAssistenzaId) return;
+    const rif = rifAssistenzeList.find((r) => r.phyo_assistenzeid === rifAssistenzaId);
+    if (!rif) return;
+    if (!clienteId && rif._phyo_cliente_value) {
+      setClienteId(rif._phyo_cliente_value);
+    }
+    if (!tipologia) {
+      const rifTip =
+        rif['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue'] || '';
+      if (rifTip) setTipologia(rifTip);
+    }
+    if (!indirizzo && rif.phyo_indirizzoassistenza) {
+      setIndirizzo(rif.phyo_indirizzoassistenza);
+    }
+  }, [rifAssistenzeList, rifAssistenzaId, clienteId, tipologia, indirizzo]);
+
   // Images (only in edit mode)
   const { data: images, refetch: refetchImages } = useQuery({
     queryKey: ['images', assistenza?.id],
@@ -253,7 +274,6 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
 
   const [localPreviews, setLocalPreviews] = useState<{ file: File; preview: string }[]>([]);
   const [uploading, setUploading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = useCallback((files: FileList | null) => {
     if (!files) return;
@@ -387,6 +407,17 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
   const isPending = updateMutation.isPending || createMutation.isPending;
 
   const buildBasePayload = useCallback(() => {
+    // Risolve la label tipologia nel valore numerico dell'option set,
+    // cercando un Rif. Assistenza con la stessa FormattedValue.
+    let tipologiaValue: number | null = null;
+    if (tipologia && rifAssistenzeList) {
+      const match = rifAssistenzeList.find(
+        (r) => (r['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue'] || '') === tipologia
+      );
+      const raw = match?.phyo_tipologia_assistenza;
+      if (typeof raw === 'number') tipologiaValue = raw;
+      else if (typeof raw === 'string' && raw.trim() !== '' && !Number.isNaN(Number(raw))) tipologiaValue = Number(raw);
+    }
     return {
       phyo_attne: attne || null,
       phyo_oreintervento: oreIntervento ? (() => {
@@ -399,8 +430,9 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
       phyo_totale: totale || null,
       _phyo_cliente_value: clienteId || null,
       _phyo_rifassistenza_value: rifAssistenzaId || null,
+      phyo_tipologia_assistenza: tipologiaValue,
     };
-  }, [attne, oreIntervento, ore, descrizione, materiale, totale, clienteId, rifAssistenzaId]);
+  }, [attne, oreIntervento, ore, descrizione, materiale, totale, clienteId, rifAssistenzaId, tipologia, rifAssistenzeList]);
 
   const buildUpdatePayload = useCallback((): UpdateAssistenzaPayload => ({
     ...buildBasePayload(),
@@ -626,7 +658,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
                 }
               }}
               className="sm:col-span-2"
-              classNames={{ trigger: 'bg-white' }}
+              classNames={{ trigger: 'bg-[#FAFBFC]' }}
             >
               {filteredAccounts.map((acc) => (
                 <SelectItem key={acc.accountid}>
@@ -652,7 +684,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
                 }
               }}
               className="sm:col-span-2"
-              classNames={{ trigger: 'bg-white' }}
+              classNames={{ trigger: 'bg-[#FAFBFC]' }}
             >
               {tipologie.map((t) => (
                 <SelectItem key={t}>
@@ -688,7 +720,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
                 }
               }}
               className="sm:col-span-2"
-              classNames={{ trigger: 'bg-white' }}
+              classNames={{ trigger: 'bg-[#FAFBFC]' }}
             >
               {filteredRifAssistenze.map((rif) => (
                 <SelectItem key={rif.phyo_assistenzeid} textValue={rif.phyo_nrassistenze}>
@@ -709,7 +741,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
       </Card>
 
       {/* Dettagli registrazione */}
-      <Card shadow="sm" className="bg-white">
+      <Card shadow="sm" className="bg-[#E7ECEF]">
         <CardBody className="gap-2.5 p-3">
           <p className="text-xs font-semibold text-centoraggi-deep uppercase tracking-wider">Dettagli registrazione</p>
 
@@ -721,6 +753,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
                 onValueChange={setData}
                 variant="bordered"
                 type="date"
+                classNames={{ inputWrapper: 'bg-[#FAFBFC]' }}
               />
               <Input
                 label="Ore"
@@ -730,6 +763,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
                 variant="bordered"
                 type="text"
                 inputMode="decimal"
+                classNames={{ inputWrapper: 'bg-[#FAFBFC]' }}
               />
               <Input
                 label="Totale"
@@ -738,10 +772,11 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
                 onValueChange={setTotale}
                 variant="bordered"
                 type="text"
+                classNames={{ inputWrapper: 'bg-[#FAFBFC]' }}
               />
             </div>
 
-            <div className="hidden md:block rounded-2xl border border-centoraggi-accent/20 bg-centoraggi-surface p-2.5">
+            <div className="hidden md:block rounded-2xl border-2 border-centoraggi-accent/30 bg-centoraggi-surface p-2.5">
               <div className="grid grid-cols-1 gap-2">
                 <div className="flex items-center gap-2">
                   <Input
@@ -751,7 +786,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
                     onValueChange={setOreIntervento}
                     variant="bordered"
                     type="time"
-                    classNames={{ inputWrapper: 'bg-white' }}
+                    classNames={{ inputWrapper: 'bg-[#FAFBFC]' }}
                     size="sm"
                     step={1}
                     className="flex-1"
@@ -766,7 +801,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
                   </Button>
                 </div>
 
-                <div className="flex items-center justify-between gap-2 rounded-xl border border-default-200 bg-white px-3 py-2">
+                <div className="flex items-center justify-between gap-2 rounded-xl border-2 border-centoraggi-accent/30 bg-[#FAFBFC] px-3 py-2">
                   <div>
                     <p className="text-[10px] uppercase tracking-wider text-default-400">Timer</p>
                     <p className={`font-mono text-lg font-bold ${
@@ -826,6 +861,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
             value={attne}
             onValueChange={setAttne}
             variant="bordered"
+            classNames={{ inputWrapper: 'bg-[#FAFBFC]' }}
           />
 
           <Textarea
@@ -835,6 +871,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
             onValueChange={setDescrizione}
             variant="bordered"
             minRows={2}
+            classNames={{ inputWrapper: 'bg-[#FAFBFC]' }}
           />
 
           <Textarea
@@ -844,129 +881,25 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
             onValueChange={setMateriale}
             variant="bordered"
             minRows={2}
+            classNames={{ inputWrapper: 'bg-[#FAFBFC]' }}
           />
         </CardBody>
       </Card>
 
       {/* Foto / Allegati */}
-        <Card shadow="sm" className="bg-white">
-          <CardBody className="gap-2.5 p-3">
-
-            {/* Upload buttons */}
-            <div className="flex gap-2 flex-wrap">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={(e) => { handleFileSelect(e.target.files); e.target.value = ''; }}
-              />
-              <Button
-                color="primary"
-                variant="flat"
-                onPress={() => fileInputRef.current?.click()}
-                startContent={<ImageIcon className="w-5 h-5" />}
-              >
-                Scegli immagini
-              </Button>
-              <input
-                ref={(el) => { if (el) el.setAttribute('capture', 'environment'); }}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                id="cameraInput"
-                className="hidden"
-                onChange={(e) => { handleFileSelect(e.target.files); e.target.value = ''; }}
-              />
-              <Button
-                color="secondary"
-                variant="flat"
-                onPress={() => document.getElementById('cameraInput')?.click()}
-                startContent={<Camera className="w-5 h-5" />}
-              >
-                Scatta foto
-              </Button>
-              {localPreviews.length > 0 && !isCreate && (
-                <Button
-                  color="primary"
-                  isLoading={uploading}
-                  onPress={() => uploadAllImages()}
-                  startContent={!uploading ? <Upload className="w-5 h-5" /> : undefined}
-                >
-                  Carica {localPreviews.length} immagin{localPreviews.length === 1 ? 'e' : 'i'}
-                </Button>
-              )}
-            </div>
-
-            {/* Local previews (not yet uploaded) */}
-            {localPreviews.length > 0 && (
-              <div>
-                <p className="text-xs text-default-400 mb-2">
-                  Da caricare{isCreate ? ' (verranno caricate al salvataggio)' : ''}
-                </p>
-                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
-                  {localPreviews.map((p, i) => (
-                    <div key={i} className="relative group aspect-square rounded-lg overflow-hidden border border-centoraggi-accent/20">
-                      <img src={p.preview} alt={p.file.name} className="w-full h-full object-cover" />
-                      <button
-                        type="button"
-                        onClick={() => removeLocalPreview(i)}
-                        className="absolute top-1 right-1 w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                        aria-label="Rimuovi immagine"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Uploaded images from Dataverse (only in edit mode) */}
-            {!isCreate && images && images.length > 0 && (
-              <div>
-                <p className="text-xs text-default-400 mb-2">Caricate ({images.length})</p>
-                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
-                  {images.map((img) => (
-                    <div key={img.annotationid} className="relative group aspect-square rounded-lg overflow-hidden border border-centoraggi-accent/20">
-                      <img
-                        src={`data:${img.mimetype};base64,${img.documentbody}`}
-                        alt={img.filename}
-                        className="w-full h-full object-cover cursor-pointer"
-                        onClick={() => {
-                          const w = window.open();
-                          if (w) {
-                            w.document.write(`<img src="data:${img.mimetype};base64,${img.documentbody}" style="max-width:100%;max-height:100vh;margin:auto;display:block" />`);
-                            w.document.title = img.filename;
-                          }
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteImage(img.annotationid)}
-                        className="absolute top-1 right-1 w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                        aria-label="Elimina immagine"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                      <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-[10px] px-1 py-0.5 truncate">
-                        {img.filename}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {(!images || images.length === 0) && localPreviews.length === 0 && (
-              <p className="text-sm text-default-400 text-center py-4">Nessuna foto allegata</p>
-            )}
-          </CardBody>
-        </Card>
+      <AssistenzaImagesSection
+        isCreate={isCreate}
+        images={images}
+        localPreviews={localPreviews}
+        uploading={uploading}
+        onFileSelect={handleFileSelect}
+        onRemoveLocal={removeLocalPreview}
+        onUploadAll={() => uploadAllImages()}
+        onDeleteRemote={handleDeleteImage}
+      />
 
       {/* Luogo assistenza */}
-      <Card shadow="sm" className="bg-white">
+      <Card shadow="sm" className="bg-[#E7ECEF]">
         <CardBody className="gap-2.5 p-3">
           <p className="text-xs font-semibold text-centoraggi-deep uppercase tracking-wider">Luogo assistenza</p>
           <div className="flex gap-2">
@@ -987,18 +920,21 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
                   // Delay to allow click on suggestion
                   setTimeout(() => setInputFocused(false), 200);
                 }}
-                className="w-full h-[56px] px-3 rounded-xl border-2 border-centoraggi-accent/30 bg-white text-sm outline-none focus:border-centoraggi-accent transition-colors"
+                className="w-full h-[56px] px-3 rounded-xl border-2 border-centoraggi-accent/30 bg-[#FAFBFC] text-sm outline-none focus:border-centoraggi-accent transition-colors"
               />
               {inputFocused && suggestions.length > 0 && (
                 <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white rounded-lg shadow-lg border border-centoraggi-accent/20 max-h-[200px] overflow-y-auto">
-                  {suggestions.map((s) => (
+                  {suggestions.map((s) => {
+                    const { primary, secondary } = formatGeocode(s);
+                    return (
                     <button
                       key={s.place_id}
                       type="button"
                       className="w-full text-left px-3 py-2.5 text-sm hover:bg-centoraggi-surface transition-colors cursor-pointer border-b border-default-100 last:border-b-0"
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => {
-                        setIndirizzo(s.display_name);
+                        const finalAddress = secondary ? `${primary}, ${secondary}` : primary;
+                        setIndirizzo(finalAddress || s.display_name);
                         setMapCenter({ lat: parseFloat(s.lat), lng: parseFloat(s.lon) });
                         setInputFocused(false);
                         setSuggestions([]);
@@ -1007,10 +943,14 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
                     >
                       <div className="flex items-start gap-2">
                         <MapPin className="w-4 h-4 mt-0.5 text-centoraggi-teal flex-shrink-0" />
-                        <span className="text-default-700">{s.display_name}</span>
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-default-800 font-medium truncate">{primary || s.display_name}</span>
+                          {secondary && <span className="text-default-500 text-xs truncate">{secondary}</span>}
+                        </div>
                       </div>
                     </button>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1022,11 +962,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
                 setShowMap(true);
                 if (!mapCenter) {
                   try {
-                    const res = await fetch(
-                      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(indirizzo)}`,
-                      { headers: { 'Accept-Language': 'it' } }
-                    );
-                    const data: NominatimResult[] = await res.json();
+                    const data = await geocodeAddress(indirizzo);
                     if (data[0]) {
                       setMapCenter({ lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) });
                     }

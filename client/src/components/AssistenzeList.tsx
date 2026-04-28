@@ -9,9 +9,11 @@ import {
   PauseCircle,
   CheckCircle2,
   FileText,
+  MapPin,
+  Filter,
   type LucideIcon,
 } from 'lucide-react';
-import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Table,
   TableHeader,
@@ -29,11 +31,14 @@ import {
   DropdownTrigger,
   DropdownMenu,
   DropdownItem,
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
   Select,
   SelectItem,
   addToast,
 } from '@heroui/react';
-import { fetchAssistenzeRegistrazioni, updateAssistenza } from '../services/api';
+import { fetchAssistenzeRegistrazioni, fetchRifAssistenze, updateAssistenza } from '../services/api';
 import { getActiveTimers } from '../services/timerStore';
 import {
   AssistenzaRegistrazioneRaw,
@@ -41,6 +46,8 @@ import {
   mapAssistenzaRegistrazione,
 } from '../types/assistenzaRegistrazione';
 import ListSkeleton from './skeletons/ListSkeleton';
+import ErrorState from './ErrorState';
+import AssistenzaMobileCard from './AssistenzaMobileCard';
 
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return '—';
@@ -99,12 +106,70 @@ interface AssistenzeListProps {
 
 const PAGE_SIZE = 20;
 
+function MapButton({ address }: { address?: string | null }) {
+  const has = !!(address && address.trim());
+  const href = has ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address!.trim())}` : undefined;
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="Apri in Google Maps"
+      title={has ? address! : 'Indirizzo non disponibile'}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (!has) e.preventDefault();
+      }}
+      className={`inline-flex items-center justify-center w-8 h-8 rounded-md transition-colors ${
+        has
+          ? 'bg-emerald-100 text-emerald-600 hover:bg-emerald-200'
+          : 'bg-default-100 text-default-300 cursor-not-allowed pointer-events-none'
+      }`}
+    >
+      <MapPin className="w-4 h-4" />
+    </a>
+  );
+}
+
 export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: AssistenzeListProps) {
   const [search, setSearch] = useState('');
   const [tipologiaFilter, setTipologiaFilter] = useState<Set<string>>(new Set());
+  const [colFilters, setColFilters] = useState<Record<string, string>>({});
+  const setColFilter = useCallback((key: string, value: string) => {
+    setColFilters((prev) => {
+      const next = { ...prev };
+      if (value) next[key] = value;
+      else delete next[key];
+      return next;
+    });
+  }, []);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<'global' | 'grouped' | 'manutenzioni'>('grouped');
   const [loadingAll, setLoadingAll] = useState(false);
+  const [sortDescriptor, setSortDescriptor] = useState<{ column: React.Key; direction: 'ascending' | 'descending' }>({
+    column: 'data',
+    direction: 'descending',
+  });
+  const sortItems = useCallback((items: AssistenzaRegistrazione[]): AssistenzaRegistrazione[] => {
+    const dir = sortDescriptor.direction === 'ascending' ? 1 : -1;
+    const col = sortDescriptor.column as string;
+    const getKey = (a: AssistenzaRegistrazione): string | number => {
+      switch (col) {
+        case 'data': return a.data ? new Date(a.data).getTime() : 0;
+        case 'cliente': return (a.clienteNome || '').toLowerCase();
+        case 'nr': return (a.nr || '').toLowerCase();
+        case 'rif': return (a.rifAssistenzaNome || '').toLowerCase();
+        default: return 0;
+      }
+    };
+    return [...items].sort((a, b) => {
+      const ka = getKey(a);
+      const kb = getKey(b);
+      if (ka < kb) return -1 * dir;
+      if (ka > kb) return 1 * dir;
+      return 0;
+    });
+  }, [sortDescriptor]);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
 
@@ -182,6 +247,45 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
     );
   }, [handleQuickStatus]);
 
+  const renderHeader = useCallback((key: string, label: string) => {
+    const value = colFilters[key] || '';
+    return (
+      <div className="flex items-center justify-between gap-1 w-full">
+        <span>{label}</span>
+        <Popover placement="bottom-end">
+          <PopoverTrigger>
+            <span
+              role="button"
+              tabIndex={0}
+              aria-label={`Filtra ${label}`}
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') e.stopPropagation(); }}
+              className={`inline-flex items-center justify-center w-5 h-5 rounded hover:bg-default-200 transition-colors cursor-pointer ${value ? 'text-primary' : 'text-default-400'}`}
+            >
+              <Filter className="w-3 h-3" />
+            </span>
+          </PopoverTrigger>
+          <PopoverContent>
+            <div className="p-2 w-56">
+              <Input
+                size="sm"
+                autoFocus
+                placeholder={`Filtra ${label.toLowerCase()}...`}
+                value={value}
+                onValueChange={(v) => setColFilter(key, v)}
+                isClearable
+                onClear={() => setColFilter(key, '')}
+                variant="bordered"
+              />
+            </div>
+          </PopoverContent>
+        </Popover>
+      </div>
+    );
+  }, [colFilters, setColFilter]);
+
   const {
     data: pagedData,
     fetchNextPage,
@@ -241,9 +345,39 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
     return () => observer.disconnect();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage, allLoaded, loadingAll]);
 
+  const { data: rifAssistenzeList } = useQuery({
+    queryKey: ['rifAssistenze'],
+    queryFn: fetchRifAssistenze,
+    staleTime: 10 * 60 * 1000,
+  });
+
   const assistenze = useMemo(() => {
-    return rawData.map(mapAssistenzaRegistrazione);
-  }, [rawData]);
+    const mapped = rawData.map(mapAssistenzaRegistrazione);
+    if (!rifAssistenzeList || rifAssistenzeList.length === 0) return mapped;
+    const rifIndex = new Map(rifAssistenzeList.map((r) => [r.phyo_assistenzeid, r]));
+    return mapped.map((a) => {
+      if (!a.rifAssistenzaId) return a;
+      const rif = rifIndex.get(a.rifAssistenzaId);
+      if (!rif) return a;
+      const clienteNome =
+        a.clienteNome ||
+        rif['_phyo_cliente_value@OData.Community.Display.V1.FormattedValue'] ||
+        '';
+      const tipologiaAssistenza =
+        a.tipologiaAssistenza ||
+        rif['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue'] ||
+        '';
+      if (clienteNome === a.clienteNome && tipologiaAssistenza === a.tipologiaAssistenza) {
+        return a;
+      }
+      return {
+        ...a,
+        clienteId: a.clienteId ?? rif._phyo_cliente_value ?? null,
+        clienteNome,
+        tipologiaAssistenza,
+      };
+    });
+  }, [rawData, rifAssistenzeList]);
 
   const tipologiaOptions = useMemo(() => {
     const set = new Set<string>();
@@ -258,6 +392,29 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
     if (tipologiaFilter.size > 0) {
       result = result.filter((a) => tipologiaFilter.has(a.tipologiaAssistenza));
     }
+    // Filtri per-colonna (contains, case-insensitive)
+    const entries = Object.entries(colFilters).filter(([, v]) => v && v.trim());
+    if (entries.length > 0) {
+      result = result.filter((a) => {
+        for (const [key, raw] of entries) {
+          const v = raw.toLowerCase();
+          let cell = '';
+          switch (key) {
+            case 'data': cell = formatDate(a.data).toLowerCase(); break;
+            case 'nr': cell = a.nr.toLowerCase(); break;
+            case 'cliente': cell = a.clienteNome.toLowerCase(); break;
+            case 'tipologia': cell = a.tipologiaAssistenza.toLowerCase(); break;
+            case 'rif': cell = a.rifAssistenzaNome.toLowerCase(); break;
+            case 'statoreg': cell = (a.statoReg || '').toLowerCase(); break;
+            case 'attne': cell = a.attne.toLowerCase(); break;
+            case 'descrizione': cell = a.descrizioneIntervento.toLowerCase(); break;
+            default: cell = '';
+          }
+          if (!cell.includes(v)) return false;
+        }
+        return true;
+      });
+    }
     if (!search) return result;
     const q = search.toLowerCase();
     return result.filter(
@@ -270,7 +427,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
         a.descrizioneIntervento.toLowerCase().includes(q) ||
         a.materialeUtilizzato.toLowerCase().includes(q)
     );
-  }, [assistenze, search, tipologiaFilter]);
+  }, [assistenze, search, tipologiaFilter, colFilters]);
 
   const globalFiltered = useMemo(() => {
     return filtered
@@ -282,6 +439,10 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
         return new Date(b.data).getTime() - new Date(a.data).getTime();
       });
   }, [filtered]);
+
+  // Riferimento stabile per HeroUI Table + bailout React: ricomputato solo
+  // quando cambiano filtro o sortDescriptor.
+  const globalSorted = useMemo(() => sortItems(globalFiltered), [sortItems, globalFiltered]);
 
   const MANUTENZIONI_STATI = ['Programmato', 'In lavorazione'];
 
@@ -364,22 +525,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
   }
 
   if (error) {
-    return (
-      <Card className="shadow-md border-danger/20">
-        <CardBody className="flex flex-col items-center justify-center py-16 gap-4">
-          <div className="w-16 h-16 rounded-full bg-danger/10 flex items-center justify-center text-3xl">
-            !
-          </div>
-          <div className="text-center">
-            <p className="text-danger font-semibold text-lg">Errore di caricamento</p>
-            <p className="text-default-400 text-sm mt-1">{(error as Error).message}</p>
-          </div>
-          <Button color="primary" variant="flat" onPress={() => refetch()}>
-            Riprova
-          </Button>
-        </CardBody>
-      </Card>
-    );
+    return <ErrorState error={error} onRetry={() => refetch()} />;
   }
 
   return (
@@ -458,7 +604,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
           classNames={{ trigger: 'h-10 min-h-10' }}
           renderValue={(items) => {
             if (items.length === 0) return <span className="text-default-400">Tipologia</span>;
-            if (items.length === 1) return <span className="truncate">{items[0].textValue ?? items[0].key}</span>;
+            if (items.length === 1) return <span className="truncate">{String(items[0].textValue ?? items[0].key ?? '')}</span>;
             return <span>{items.length} tipologie</span>;
           }}
         >
@@ -536,70 +682,15 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                 initial="hidden"
                 animate="visible"
               >
-                {globalFiltered.map((a) => {
-                  const isRunning = runningTimerIds.has(a.id);
-                  return (
-                  <motion.div key={a.id} variants={fadeInUp}>
-                    <Card shadow="sm" className={isRunning ? 'bg-[#fff8e8] border border-warning/30' : 'bg-white'}>
-                    <CardBody className="p-3">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <span className="font-mono text-xs text-white bg-centoraggi-teal px-2 py-0.5 rounded">
-                            {a.nr}
-                          </span>
-                          <span className="text-sm font-medium ml-2">{a.rifAssistenzaNome || '—'}</span>
-                        </div>
-                        <div className="flex gap-1">
-                          {renderStatusChip(a)}
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm mt-2">
-                        <div>
-                          <span className="text-default-400 text-xs">Data</span>
-                          <p className="text-default-600">{formatDate(a.data)}</p>
-                        </div>
-                        <div>
-                          <span className="text-default-400 text-xs">Cliente</span>
-                          <p className="text-default-600">{a.clienteNome || '—'}</p>
-                        </div>
-                        <div>
-                          <span className="text-default-400 text-xs">Tipologia</span>
-                          <p className="text-default-600">{a.tipologiaAssistenza || '—'}</p>
-                        </div>
-                        <div>
-                          <span className="text-default-400 text-xs">Rif. Assistenza</span>
-                          <p className="text-default-600">{a.rifAssistenzaNome || '—'}</p>
-                        </div>
-                        <div>
-                          <span className="text-default-400 text-xs">Att.ne</span>
-                          <p className="text-default-600">{a.attne || '—'}</p>
-                        </div>
-                        <div>
-                          <span className="text-default-400 text-xs">Ore Int.</span>
-                          <p className="font-medium tabular-nums">{formatNumber(a.oreIntervento)}</p>
-                        </div>
-                        <div>
-                          <span className="text-default-400 text-xs">Ore</span>
-                          <p className="font-medium tabular-nums">{formatNumber(a.ore)}</p>
-                        </div>
-                      </div>
-                      {a.descrizioneIntervento && (
-                        <div className="text-sm mt-1">
-                          <span className="text-default-400 text-xs">Descrizione</span>
-                          <p className="text-default-600">{a.descrizioneIntervento}</p>
-                        </div>
-                      )}
-                      <div className="flex justify-between items-center mt-2">
-                        <Button size="sm" color="primary" variant="flat" onPress={() => onOpen(a)}>
-                          Apri
-                        </Button>
-                        <span className="text-sm font-medium tabular-nums">{formatCurrency(a.totale)}</span>
-                      </div>
-                    </CardBody>
-                  </Card>
-                  </motion.div>
-                  );
-                })}
+                {globalSorted.map((a) => (
+                  <AssistenzaMobileCard
+                    key={a.id}
+                    a={a}
+                    isRunning={runningTimerIds.has(a.id)}
+                    statusChip={renderStatusChip(a)}
+                    onOpen={onOpen}
+                  />
+                ))}
               </motion.div>
 
               {/* Desktop table */}
@@ -608,6 +699,8 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                   aria-label="Assistenze globali"
                   removeWrapper
                   selectionMode="none"
+                  sortDescriptor={sortDescriptor as any}
+                  onSortChange={(d) => setSortDescriptor(d as any)}
                   classNames={{
                     th: 'bg-default-50 text-default-600 text-xs uppercase tracking-wider',
                     td: 'py-2.5',
@@ -615,25 +708,23 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                 >
                   <TableHeader>
                     <TableColumn width={70} align="center">{''}</TableColumn>
-                    <TableColumn width={110}>DATA</TableColumn>
-                    <TableColumn width={90}>NR</TableColumn>
-                    <TableColumn minWidth={120}>CLIENTE</TableColumn>
-                    <TableColumn minWidth={120}>TIPOLOGIA</TableColumn>
-                    <TableColumn minWidth={100}>RIF. ASSISTENZA</TableColumn>
-                    <TableColumn width={110}>STATO REG</TableColumn>
-                    <TableColumn minWidth={90}>ATT.NE</TableColumn>
-                    <TableColumn width={75} align="end">ORE INT.</TableColumn>
-                    <TableColumn width={65} align="end">ORE</TableColumn>
-                    <TableColumn minWidth={130}>DESCRIZIONE</TableColumn>
-                    <TableColumn width={90} align="end">TOTALE</TableColumn>
+                    <TableColumn key="data" allowsSorting width={110}>{renderHeader('data', 'DATA')}</TableColumn>
+                    <TableColumn key="nr" allowsSorting width={90}>{renderHeader('nr', 'NR')}</TableColumn>
+                    <TableColumn key="cliente" allowsSorting minWidth={120}>{renderHeader('cliente', 'CLIENTE')}</TableColumn>
+                    <TableColumn minWidth={120}>{renderHeader('tipologia', 'TIPOLOGIA')}</TableColumn>
+                    <TableColumn key="rif" allowsSorting minWidth={100}>{renderHeader('rif', 'RIF. ASSISTENZA')}</TableColumn>
+                    <TableColumn width={130}>{renderHeader('statoreg', 'STATO REG')}</TableColumn>
+                    <TableColumn minWidth={90}>{renderHeader('attne', 'ATT.NE')}</TableColumn>
+                    <TableColumn minWidth={150}>{renderHeader('descrizione', 'DESCRIZIONE')}</TableColumn>
                   </TableHeader>
                   <TableBody>
-                    {globalFiltered.map((a) => (
+                    {globalSorted.map((a) => (
                       <TableRow key={a.id} className={`transition-colors ${runningTimerIds.has(a.id) ? '!bg-[#fff8e8] hover:!bg-[#fdedc7]' : 'hover:bg-default-50'}`}>
                         <TableCell>
-                          <Button size="sm" color="primary" variant="flat" onPress={() => onOpen(a)}>
-                            Apri
-                          </Button>
+                          <div className="flex gap-1">
+                            <Button size="sm" color="primary" variant="flat" onPress={() => onOpen(a)}>Apri</Button>
+                            <MapButton address={a.indirizzoAssistenza} />
+                          </div>
                         </TableCell>
                         <TableCell>
                           <span className="text-sm text-default-600">{formatDate(a.data)}</span>
@@ -659,20 +750,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                           <span className="text-sm">{a.attne || '—'}</span>
                         </TableCell>
                         <TableCell>
-                          <span className="text-sm font-medium tabular-nums">{formatNumber(a.oreIntervento)}</span>
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-sm font-medium tabular-nums">{formatNumber(a.ore)}</span>
-                        </TableCell>
-                        <TableCell>
-                          <p className="text-sm text-default-600 truncate max-w-[200px]" title={a.descrizioneIntervento}>
-                            {a.descrizioneIntervento || '—'}
-                          </p>
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-sm font-medium tabular-nums">
-                            {formatCurrency(a.totale)}
-                          </span>
+                          <p className="text-sm text-default-600 truncate max-w-[260px]" title={a.descrizioneIntervento}>{a.descrizioneIntervento || '—'}</p>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -794,9 +872,10 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                           </div>
                         )}
                         <div className="flex justify-between items-center mt-2">
-                          <Button size="sm" color="primary" variant="flat" onPress={() => onOpen(a)}>
-                            Apri
-                          </Button>
+                          <div className="flex gap-1">
+                            <Button size="sm" color="primary" variant="flat" onPress={() => onOpen(a)}>Apri</Button>
+                            <MapButton address={a.indirizzoAssistenza} />
+                          </div>
                           <span className="text-sm font-medium tabular-nums">{formatCurrency(a.totale)}</span>
                         </div>
                       </div>
@@ -809,6 +888,8 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                       aria-label={`Registrazioni ${group.stato}`}
                       removeWrapper
                       selectionMode="none"
+                      sortDescriptor={sortDescriptor as any}
+                      onSortChange={(d) => setSortDescriptor(d as any)}
                       classNames={{
                         th: 'bg-default-50 text-default-600 text-xs uppercase tracking-wider',
                         td: 'py-2.5',
@@ -816,24 +897,22 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                     >
                       <TableHeader>
                         <TableColumn width={70} align="center">{''}</TableColumn>
-                        <TableColumn width={110}>DATA</TableColumn>
-                        <TableColumn width={90}>NR</TableColumn>
-                        <TableColumn minWidth={120}>CLIENTE</TableColumn>
-                        <TableColumn minWidth={120}>TIPOLOGIA</TableColumn>
-                        <TableColumn minWidth={100}>RIF. ASSISTENZA</TableColumn>
-                        <TableColumn minWidth={90}>ATT.NE</TableColumn>
-                        <TableColumn width={75} align="end">ORE INT.</TableColumn>
-                        <TableColumn width={65} align="end">ORE</TableColumn>
-                        <TableColumn minWidth={130}>DESCRIZIONE</TableColumn>
-                        <TableColumn width={90} align="end">TOTALE</TableColumn>
+                        <TableColumn key="data" allowsSorting width={110}>{renderHeader('data', 'DATA')}</TableColumn>
+                        <TableColumn key="nr" allowsSorting width={90}>{renderHeader('nr', 'NR')}</TableColumn>
+                        <TableColumn key="cliente" allowsSorting minWidth={120}>{renderHeader('cliente', 'CLIENTE')}</TableColumn>
+                        <TableColumn minWidth={120}>{renderHeader('tipologia', 'TIPOLOGIA')}</TableColumn>
+                        <TableColumn key="rif" allowsSorting minWidth={100}>{renderHeader('rif', 'RIF. ASSISTENZA')}</TableColumn>
+                        <TableColumn minWidth={90}>{renderHeader('attne', 'ATT.NE')}</TableColumn>
+                        <TableColumn minWidth={150}>{renderHeader('descrizione', 'DESCRIZIONE')}</TableColumn>
                       </TableHeader>
                       <TableBody>
-                        {group.items.map((a) => (
+                        {sortItems(group.items).map((a) => (
                           <TableRow key={a.id} className={`transition-colors ${runningTimerIds.has(a.id) ? '!bg-[#fff8e8] hover:!bg-[#fdedc7]' : 'hover:bg-default-50'}`}>
                             <TableCell>
-                              <Button size="sm" color="primary" variant="flat" onPress={() => onOpen(a)}>
-                                Apri
-                              </Button>
+                              <div className="flex gap-1">
+                                <Button size="sm" color="primary" variant="flat" onPress={() => onOpen(a)}>Apri</Button>
+                                <MapButton address={a.indirizzoAssistenza} />
+                              </div>
                             </TableCell>
                             <TableCell>
                               <span className="text-sm text-default-600">{formatDate(a.data)}</span>
@@ -856,20 +935,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                               <span className="text-sm">{a.attne || '—'}</span>
                             </TableCell>
                             <TableCell>
-                              <span className="text-sm font-medium tabular-nums">{formatNumber(a.oreIntervento)}</span>
-                            </TableCell>
-                            <TableCell>
-                              <span className="text-sm font-medium tabular-nums">{formatNumber(a.ore)}</span>
-                            </TableCell>
-                            <TableCell>
-                              <p className="text-sm text-default-600 truncate max-w-[200px]" title={a.descrizioneIntervento}>
-                                {a.descrizioneIntervento || '—'}
-                              </p>
-                            </TableCell>
-                            <TableCell>
-                              <span className="text-sm font-medium tabular-nums">
-                                {formatCurrency(a.totale)}
-                              </span>
+                              <p className="text-sm text-default-600 truncate max-w-[260px]" title={a.descrizioneIntervento}>{a.descrizioneIntervento || '—'}</p>
                             </TableCell>
                           </TableRow>
                         ))}
@@ -989,9 +1055,10 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                             </div>
                           )}
                           <div className="flex justify-between items-center mt-2">
-                            <Button size="sm" color="primary" variant="flat" onPress={() => onOpen(a)}>
-                              Apri
-                            </Button>
+                            <div className="flex gap-1">
+                              <Button size="sm" color="primary" variant="flat" onPress={() => onOpen(a)}>Apri</Button>
+                              <MapButton address={a.indirizzoAssistenza} />
+                            </div>
                             <span className="text-sm font-medium tabular-nums">{formatCurrency(a.totale)}</span>
                           </div>
                         </div>
@@ -1004,6 +1071,8 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                         aria-label={`Manutenzioni ${group.stato}`}
                         removeWrapper
                         selectionMode="none"
+                        sortDescriptor={sortDescriptor as any}
+                        onSortChange={(d) => setSortDescriptor(d as any)}
                         classNames={{
                           th: 'bg-default-50 text-default-600 text-xs uppercase tracking-wider',
                           td: 'py-2.5',
@@ -1011,24 +1080,22 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                       >
                         <TableHeader>
                           <TableColumn width={70} align="center">{''}</TableColumn>
-                          <TableColumn width={110}>DATA</TableColumn>
-                          <TableColumn width={90}>NR</TableColumn>
-                          <TableColumn minWidth={120}>CLIENTE</TableColumn>
-                          <TableColumn minWidth={120}>TIPOLOGIA</TableColumn>
-                          <TableColumn minWidth={100}>RIF. ASSISTENZA</TableColumn>
-                          <TableColumn minWidth={90}>ATT.NE</TableColumn>
-                          <TableColumn width={75} align="end">ORE INT.</TableColumn>
-                          <TableColumn width={65} align="end">ORE</TableColumn>
-                          <TableColumn minWidth={130}>DESCRIZIONE</TableColumn>
-                          <TableColumn width={90} align="end">TOTALE</TableColumn>
+                          <TableColumn key="data" allowsSorting width={110}>{renderHeader('data', 'DATA')}</TableColumn>
+                          <TableColumn key="nr" allowsSorting width={90}>{renderHeader('nr', 'NR')}</TableColumn>
+                          <TableColumn key="cliente" allowsSorting minWidth={120}>{renderHeader('cliente', 'CLIENTE')}</TableColumn>
+                          <TableColumn minWidth={120}>{renderHeader('tipologia', 'TIPOLOGIA')}</TableColumn>
+                          <TableColumn key="rif" allowsSorting minWidth={100}>{renderHeader('rif', 'RIF. ASSISTENZA')}</TableColumn>
+                          <TableColumn minWidth={90}>{renderHeader('attne', 'ATT.NE')}</TableColumn>
+                          <TableColumn minWidth={150}>{renderHeader('descrizione', 'DESCRIZIONE')}</TableColumn>
                         </TableHeader>
                         <TableBody>
-                          {group.items.map((a) => (
+                          {sortItems(group.items).map((a) => (
                             <TableRow key={a.id} className={`transition-colors ${runningTimerIds.has(a.id) ? '!bg-[#fff8e8] hover:!bg-[#fdedc7]' : 'hover:bg-default-50'}`}>
                               <TableCell>
-                                <Button size="sm" color="primary" variant="flat" onPress={() => onOpen(a)}>
-                                  Apri
-                                </Button>
+                                <div className="flex gap-1">
+                                  <Button size="sm" color="primary" variant="flat" onPress={() => onOpen(a)}>Apri</Button>
+                                  <MapButton address={a.indirizzoAssistenza} />
+                                </div>
                               </TableCell>
                               <TableCell>
                                 <span className="text-sm text-default-600">{formatDate(a.data)}</span>
@@ -1051,20 +1118,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                                 <span className="text-sm">{a.attne || '—'}</span>
                               </TableCell>
                               <TableCell>
-                                <span className="text-sm font-medium tabular-nums">{formatNumber(a.oreIntervento)}</span>
-                              </TableCell>
-                              <TableCell>
-                                <span className="text-sm font-medium tabular-nums">{formatNumber(a.ore)}</span>
-                              </TableCell>
-                              <TableCell>
-                                <p className="text-sm text-default-600 truncate max-w-[200px]" title={a.descrizioneIntervento}>
-                                  {a.descrizioneIntervento || '—'}
-                                </p>
-                              </TableCell>
-                              <TableCell>
-                                <span className="text-sm font-medium tabular-nums">
-                                  {formatCurrency(a.totale)}
-                                </span>
+                                <p className="text-sm text-default-600 truncate max-w-[260px]" title={a.descrizioneIntervento}>{a.descrizioneIntervento || '—'}</p>
                               </TableCell>
                             </TableRow>
                           ))}

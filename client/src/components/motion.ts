@@ -6,7 +6,7 @@ import { Variants, Transition } from 'framer-motion';
  * exposes a `MotionGlobalConfig.skipAnimations` (we keep duration short instead).
  */
 
-const easing: Transition['ease'] = [0.22, 1, 0.36, 1]; // easeOutQuint-ish
+const easing: [number, number, number, number] = [0.22, 1, 0.36, 1]; // easeOutQuint-ish
 
 export const fadeInUp: Variants = {
   hidden: { opacity: 0, y: 8 },

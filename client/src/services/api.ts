@@ -101,11 +101,16 @@ export interface UpdateAssistenzaPayload {
   phyo_totale?: string | null;
   _phyo_rifassistenza_value?: string | null;
   _phyo_cliente_value?: string | null;
+  phyo_tipologia_assistenza?: number | null;
   phyo_statoreg?: number | null;
   phyo_data?: string | null;
 }
 
 export async function updateAssistenza(id: string, payload: UpdateAssistenzaPayload): Promise<void> {
+  if (!id || typeof id !== 'string' || !/^[0-9a-fA-F-]{36}$/.test(id)) {
+    console.error('[updateAssistenza] id non valido:', id);
+    throw new Error('ID registrazione non valido');
+  }
   await api.patch(`/dataverse/assistenze/${id}`, payload);
 }
 
@@ -120,6 +125,7 @@ export interface CreateAssistenzaPayload {
   _phyo_risorsa_value: string;
   _phyo_rifassistenza_value?: string | null;
   _phyo_cliente_value?: string | null;
+  phyo_tipologia_assistenza?: number | null;
 }
 
 export async function createAssistenza(payload: CreateAssistenzaPayload): Promise<{ id: string }> {
@@ -130,7 +136,7 @@ export async function createAssistenza(payload: CreateAssistenzaPayload): Promis
 export interface RifAssistenza {
   phyo_assistenzeid: string;
   phyo_nrassistenze: string;
-  phyo_tipologia_assistenza: string | null;
+  phyo_tipologia_assistenza: string | number | null;
   phyo_indirizzoassistenza: string | null;
   _phyo_cliente_value?: string | null;
   ['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue']?: string;
@@ -186,4 +192,40 @@ export async function uploadImage(
 
 export async function deleteImage(annotationId: string): Promise<void> {
   await api.delete(`/dataverse/annotations/${annotationId}`);
+}
+
+// --- Geocoding (proxy backend → Nominatim) ---
+
+export interface GeocodeAddress {
+  road?: string;
+  pedestrian?: string;
+  house_number?: string;
+  suburb?: string;
+  village?: string;
+  town?: string;
+  city?: string;
+  municipality?: string;
+  county?: string;
+  state?: string;
+  postcode?: string;
+  country?: string;
+}
+
+export interface GeocodeResult {
+  place_id: number;
+  display_name: string;
+  lat: string;
+  lon: string;
+  class?: string;
+  type?: string;
+  importance?: number;
+  address?: GeocodeAddress;
+}
+
+export async function geocodeAddress(query: string): Promise<GeocodeResult[]> {
+  const { data } = await api.get<{ success: boolean; data: GeocodeResult[] }>(
+    '/geocode',
+    { params: { q: query } }
+  );
+  return data.data || [];
 }

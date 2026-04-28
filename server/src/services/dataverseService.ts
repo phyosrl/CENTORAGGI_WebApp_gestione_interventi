@@ -75,7 +75,7 @@ export class DataverseService {
     }
   }
 
-  async query(entityName: string, filter?: string, select?: string[], orderby?: string): Promise<any[]> {
+  async query(entityName: string, filter?: string, select?: string[], orderby?: string, expand?: string): Promise<any[]> {
     const token = await this.getAccessToken();
     
     let url = `/api/data/v9.2/${entityName}`;
@@ -86,6 +86,9 @@ export class DataverseService {
     }
     if (select && select.length > 0) {
       params.append('$select', select.join(','));
+    }
+    if (expand) {
+      params.append('$expand', expand);
     }
     if (orderby) {
       params.append('$orderby', orderby);
@@ -203,8 +206,10 @@ export class DataverseService {
     'phyo_costoorario',
     'phyo_totale',
     'phyo_materialeutilizzato',
+    'phyo_tipologia_assistenza',
     '_phyo_rifassistenza_value',
     '_phyo_risorsa_value',
+    '_phyo_cliente_value',
     'statecode'
   ];
 
@@ -213,7 +218,7 @@ export class DataverseService {
       ? `_phyo_risorsa_value eq ${this.sanitizeGuid(risorsaId)}`
       : undefined;
 
-    return this.query('phyo_assistenzeregistrazionis', filter, this.assistenzeSelect);
+    return this.query('phyo_assistenzeregistrazionis', filter, this.assistenzeSelect, undefined, 'phyo_rifassistenza($select=phyo_indirizzoassistenza)');
   }
 
   async getAssistenzePaged(risorsaId?: string, pageSize?: number, skipToken?: string): Promise<{ data: any[]; totalCount: number; skipToken: string | null }> {
@@ -227,6 +232,7 @@ export class DataverseService {
       orderby: 'phyo_nr desc',
       pageSize,
       skipToken,
+      expand: 'phyo_rifassistenza($select=phyo_indirizzoassistenza)',
     });
   }
 
@@ -236,6 +242,7 @@ export class DataverseService {
     orderby?: string;
     pageSize?: number;
     skipToken?: string;
+    expand?: string;
   }): Promise<{ data: any[]; totalCount: number; skipToken: string | null }> {
     const token = await this.getAccessToken();
 
@@ -244,6 +251,7 @@ export class DataverseService {
 
     if (options.filter) params.append('$filter', options.filter);
     if (options.select?.length) params.append('$select', options.select.join(','));
+    if (options.expand) params.append('$expand', options.expand);
     if (options.orderby) params.append('$orderby', options.orderby);
     params.append('$count', 'true');
 

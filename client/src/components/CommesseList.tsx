@@ -24,6 +24,7 @@ import {
 import { fetchCommesse } from '../services/api';
 import { Commessa, CommessaRaw, mapCommessa, TipologiaCommessaMap } from '../types/commessa';
 import ListSkeleton from './skeletons/ListSkeleton';
+import ErrorState from './ErrorState';
 
 const tipologiaOptions = Object.entries(TipologiaCommessaMap).map(([value, label]) => ({
   value,
@@ -120,22 +121,7 @@ export default function CommesseList() {
   }
 
   if (error) {
-    return (
-      <Card className="shadow-md border-danger/20">
-        <CardBody className="flex flex-col items-center justify-center py-16 gap-4">
-          <div className="w-16 h-16 rounded-full bg-danger/10 flex items-center justify-center text-3xl">
-            !
-          </div>
-          <div className="text-center">
-            <p className="text-danger font-semibold text-lg">Errore di caricamento</p>
-            <p className="text-default-400 text-sm mt-1">{(error as Error).message}</p>
-          </div>
-          <Button color="primary" variant="flat" onPress={() => refetch()}>
-            Riprova
-          </Button>
-        </CardBody>
-      </Card>
-    );
+    return <ErrorState error={error} onRetry={() => refetch()} />;
   }
 
   return (
@@ -200,7 +186,7 @@ export default function CommesseList() {
               size="sm"
               renderValue={(items) => {
                 if (items.length === 0) return <span className="text-default-400">Tutte</span>;
-                if (items.length === 1) return <span className="truncate">{items[0].textValue ?? items[0].key}</span>;
+                if (items.length === 1) return <span className="truncate">{items[0].textValue ?? String(items[0].key ?? '')}</span>;
                 return <span>{items.length} tipologie</span>;
               }}
             >

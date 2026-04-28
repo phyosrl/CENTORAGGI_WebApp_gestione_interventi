@@ -30,7 +30,7 @@ export default class ErrorBoundary extends React.Component<React.PropsWithChildr
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen bg-gradient-to-br from-centoraggi-bg-start to-centoraggi-bg-end flex items-center justify-center p-4">
+        <div className="min-h-screen bg-[#E7ECEF] flex items-center justify-center p-4">
           <Card className="max-w-lg w-full border-danger/20">
             <CardBody className="gap-4 p-6 text-center">
               <div className="w-14 h-14 rounded-full bg-danger/10 text-danger text-2xl mx-auto flex items-center justify-center">

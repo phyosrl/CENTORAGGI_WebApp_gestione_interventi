@@ -1,9 +1,9 @@
 @import "tailwindcss";
 @config "../tailwind.config.js";
 
-/* Global blue borders — token: --centoraggi-accent === centoraggi.600 (#168AAD) */
+/* Global blue borders — token: --centoraggi-accent === centoraggi.accent (#6096BA) */
 :root {
-  --centoraggi-accent: #168AAD;
+  --centoraggi-accent: #6096BA;
   --border-blue: var(--centoraggi-accent);
 }
 
