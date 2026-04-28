@@ -71,8 +71,14 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
   );
   const [descrizione, setDescrizione] = useState(assistenza?.descrizioneIntervento ?? '');
   const [materiale, setMateriale] = useState(assistenza?.materialeUtilizzato ?? '');
+  const [note, setNote] = useState(assistenza?.note ?? '');
+  const [costoOrario, setCostoOrario] = useState(
+    assistenza?.costoOrario != null ? String(assistenza.costoOrario) : ''
+  );
   const [totale, setTotale] = useState(assistenza?.totale != null ? String(assistenza.totale) : '');
   const [data, setData] = useState(assistenza?.data ? assistenza.data.split('T')[0] : new Date().toISOString().split('T')[0]);
+  const [dataOraInizio, setDataOraInizio] = useState('');
+  const [dataOraFine, setDataOraFine] = useState('');
   const [clienteId, setClienteId] = useState(assistenza?.clienteId ?? '');
   const [rifAssistenzaId, setRifAssistenzaId] = useState(assistenza?.rifAssistenzaId ?? '');
   const [tipologia, setTipologia] = useState(assistenza?.tipologiaAssistenza ?? '');
@@ -202,9 +208,43 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
     const m = Math.floor((timerSeconds % 3600) / 60);
     const s = timerSeconds % 60;
     setOreIntervento(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`);
-    handleStopTimer();
+    // Conferma: ferma il timer locale e rimuove la voce dal banner "Attività in corso"
+    setTimerBaseSeconds(timerSeconds);
+    setTimerStatus('idle');
+    setTimerStartedAt(null);
+    removeActiveTimer(timerKey);
     addToast({ title: 'Tempo applicato', description: 'Ore intervento aggiornate con il timer', color: 'success' });
-  }, [handleStopTimer, timerSeconds]);
+  }, [timerKey, timerSeconds]);
+
+  // Calcolo automatico Ore Intervento da data/ora inizio e fine
+  useEffect(() => {
+    if (!dataOraInizio || !dataOraFine) return;
+    const inizio = new Date(dataOraInizio).getTime();
+    const fine = new Date(dataOraFine).getTime();
+    if (isNaN(inizio) || isNaN(fine) || fine <= inizio) return;
+    const totalSeconds = Math.floor((fine - inizio) / 1000);
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    const s = totalSeconds % 60;
+    setOreIntervento(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`);
+  }, [dataOraInizio, dataOraFine]);
+
+  // Sincronizza la parte data di inizio/fine quando cambia il campo Data,
+  // mantenendo l'ora inserita dall'utente. Se i campi sono vuoti, non li tocca.
+  useEffect(() => {
+    if (!data) return;
+    setDataOraInizio((prev) => {
+      if (!prev) return prev;
+      const timePart = prev.includes('T') ? prev.split('T')[1] : prev;
+      return `${data}T${timePart}`;
+    });
+    setDataOraFine((prev) => {
+      if (!prev) return prev;
+      const timePart = prev.includes('T') ? prev.split('T')[1] : prev;
+      return `${data}T${timePart}`;
+    });
+  }, [data]);
+
   const suggestionsRef = useRef<HTMLDivElement>(null);
 
   // Debounced address search via backend geocoding proxy (cache + rate limit server-side)
@@ -427,12 +467,14 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
       phyo_ore: ore ? parseFloat(ore.replace(',', '.')) : null,
       phyo_descrizioneintervento: descrizione || null,
       phyo_materialeutilizzato: materiale || null,
+      phyo_note: note || null,
+      phyo_costoorario: costoOrario ? parseFloat(costoOrario.replace(',', '.')) : null,
       phyo_totale: totale || null,
       _phyo_cliente_value: clienteId || null,
       _phyo_rifassistenza_value: rifAssistenzaId || null,
       phyo_tipologia_assistenza: tipologiaValue,
     };
-  }, [attne, oreIntervento, ore, descrizione, materiale, totale, clienteId, rifAssistenzaId, tipologia, rifAssistenzeList]);
+  }, [attne, oreIntervento, ore, descrizione, materiale, note, costoOrario, totale, clienteId, rifAssistenzaId, tipologia, rifAssistenzeList]);
 
   const buildUpdatePayload = useCallback((): UpdateAssistenzaPayload => ({
     ...buildBasePayload(),
@@ -756,23 +798,30 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
                 classNames={{ inputWrapper: 'bg-[#FAFBFC]' }}
               />
               <Input
-                label="Ore"
-                placeholder="0,00"
-                value={ore}
-                onValueChange={setOre}
+                label="Ora inizio intervento"
+                value={dataOraInizio.includes('T') ? dataOraInizio.split('T')[1].slice(0, 5) : ''}
+                onValueChange={(time) => {
+                  if (!time) { setDataOraInizio(''); return; }
+                  const baseDate = data || new Date().toISOString().split('T')[0];
+                  setDataOraInizio(`${baseDate}T${time}`);
+                }}
                 variant="bordered"
-                type="text"
-                inputMode="decimal"
+                type="time"
                 classNames={{ inputWrapper: 'bg-[#FAFBFC]' }}
               />
               <Input
-                label="Totale"
-                placeholder="Inserisci totale..."
-                value={totale}
-                onValueChange={setTotale}
+                label="Ora fine intervento"
+                value={dataOraFine.includes('T') ? dataOraFine.split('T')[1].slice(0, 5) : ''}
+                onValueChange={(time) => {
+                  if (!time) { setDataOraFine(''); return; }
+                  const baseDate = data || new Date().toISOString().split('T')[0];
+                  setDataOraFine(`${baseDate}T${time}`);
+                }}
                 variant="bordered"
-                type="text"
+                type="time"
                 classNames={{ inputWrapper: 'bg-[#FAFBFC]' }}
+                isInvalid={!!dataOraInizio && !!dataOraFine && new Date(dataOraFine) <= new Date(dataOraInizio)}
+                errorMessage={!!dataOraInizio && !!dataOraFine && new Date(dataOraFine) <= new Date(dataOraInizio) ? 'L\'ora fine deve essere successiva all\'ora inizio' : undefined}
               />
             </div>
 
@@ -855,6 +904,29 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
             </div>
           </div>
 
+          <div className="grid grid-cols-2 gap-2.5">
+            <Input
+              label="Ore viaggio"
+              placeholder="0,00"
+              value={ore}
+              onValueChange={setOre}
+              variant="bordered"
+              type="text"
+              inputMode="decimal"
+              classNames={{ inputWrapper: 'bg-[#FAFBFC]' }}
+            />
+            <Input
+              label="Costo orario"
+              placeholder="0,00"
+              value={costoOrario}
+              onValueChange={setCostoOrario}
+              variant="bordered"
+              type="text"
+              inputMode="decimal"
+              classNames={{ inputWrapper: 'bg-[#FAFBFC]' }}
+            />
+          </div>
+
           <Input
             label="Att.ne"
             placeholder="Inserisci att.ne..."
@@ -879,6 +951,26 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
             placeholder="Elenca il materiale utilizzato..."
             value={materiale}
             onValueChange={setMateriale}
+            variant="bordered"
+            minRows={2}
+            classNames={{ inputWrapper: 'bg-[#FAFBFC]' }}
+          />
+
+          <Input
+            label="Totale"
+            placeholder="Inserisci totale..."
+            value={totale}
+            onValueChange={setTotale}
+            variant="bordered"
+            type="text"
+            classNames={{ inputWrapper: 'bg-[#FAFBFC]' }}
+          />
+
+          <Textarea
+            label="Note"
+            placeholder="Note aggiuntive..."
+            value={note}
+            onValueChange={setNote}
             variant="bordered"
             minRows={2}
             classNames={{ inputWrapper: 'bg-[#FAFBFC]' }}

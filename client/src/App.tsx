@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { HeroUIProvider, ToastProvider } from '@heroui/react';
 import { Navbar, NavbarBrand, NavbarContent, Button } from '@heroui/react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { useQueryClient } from '@tanstack/react-query';
 import AssistenzeList from './components/AssistenzeList';
 import AssistenzaEdit from './components/AssistenzaEdit';
 import CalendarPage from './components/CalendarPage';
@@ -9,13 +10,14 @@ import LoginPage from './components/LoginPage';
 import ErrorBoundary from './components/ErrorBoundary';
 import ActiveTimersPanel from './components/ActiveTimersPanel';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { AssistenzaRegistrazione } from './types/assistenzaRegistrazione';
+import { AssistenzaRegistrazione, AssistenzaRegistrazioneRaw, mapAssistenzaRegistrazione } from './types/assistenzaRegistrazione';
 import { getActiveTimers } from './services/timerStore';
 
 type View = { type: 'calendar' } | { type: 'list' } | { type: 'edit'; assistenza: AssistenzaRegistrazione } | { type: 'create' };
 
 function AppContent() {
   const { user, logout } = useAuth();
+  const queryClient = useQueryClient();
   const [view, setView] = useState<View>({ type: 'calendar' });
   const [previousView, setPreviousView] = useState<'calendar' | 'list'>('calendar');
   const [isOnline, setIsOnline] = useState(typeof window === 'undefined' ? true : window.navigator.onLine);
@@ -48,6 +50,23 @@ function AppContent() {
     setPreviousView((prev) => (view.type === 'calendar' || view.type === 'list' ? view.type : prev));
     setView({ type: 'edit', assistenza: a });
   }, [view]);
+
+  const handleOpenById = useCallback((assistenzaId: string) => {
+    // Cerca il record nelle cache di react-query (lista assistenze / calendario)
+    const queries = queryClient.getQueriesData<{ data: AssistenzaRegistrazioneRaw[] } | AssistenzaRegistrazioneRaw[]>({});
+    for (const [, value] of queries) {
+      if (!value) continue;
+      const list = Array.isArray(value) ? value : (value as { data?: AssistenzaRegistrazioneRaw[] }).data;
+      if (!Array.isArray(list)) continue;
+      const raw = list.find((r) => r && r.phyo_assistenzeregistrazioniid === assistenzaId);
+      if (raw) {
+        const mapped = mapAssistenzaRegistrazione(raw);
+        setPreviousView((prev) => (view.type === 'calendar' || view.type === 'list' ? view.type : prev));
+        setView({ type: 'edit', assistenza: mapped });
+        return;
+      }
+    }
+  }, [queryClient, view]);
 
   const handleCreateNew = useCallback(() => {
     setPreviousView((prev) => (view.type === 'calendar' || view.type === 'list' ? view.type : prev));
@@ -141,8 +160,8 @@ function AppContent() {
         </NavbarContent>
       </Navbar>
 
-      <main className="max-w-[1400px] mx-auto px-3 sm:px-6 py-4 sm:py-8">
-        <ActiveTimersPanel />
+      <main className="w-full max-w-none px-2 sm:px-4 lg:px-6 py-4 sm:py-8">
+        <ActiveTimersPanel onOpenAssistenza={handleOpenById} />
         <AnimatePresence mode="wait" initial={false}>
           {view.type === 'edit' ? (
             <motion.div

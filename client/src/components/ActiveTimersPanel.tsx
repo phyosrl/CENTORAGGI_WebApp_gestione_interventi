@@ -1,9 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Card, CardBody, Chip, addToast } from '@heroui/react';
-import { Save, Play, Pause, Square, Check, RotateCcw, Trash2 } from 'lucide-react';
+import { Save, Play, Pause, Square, Check, RotateCcw, Trash2, ExternalLink } from 'lucide-react';
 import { formatTimerDuration, getActiveTimers, upsertActiveTimer, removeActiveTimer, type ActiveTimerItem } from '../services/timerStore';
 
-export default function ActiveTimersPanel() {
+interface ActiveTimersPanelProps {
+  onOpenAssistenza?: (assistenzaId: string) => void;
+}
+
+export default function ActiveTimersPanel({ onOpenAssistenza }: ActiveTimersPanelProps = {}) {
   const [timers, setTimers] = useState<ActiveTimerItem[]>(() => getActiveTimers());
   const [, setNow] = useState(Date.now());
 
@@ -51,7 +55,19 @@ export default function ActiveTimersPanel() {
                 <div className="space-y-3">
                   <div className="flex items-center justify-between gap-3 flex-wrap">
                     <div className="flex items-center gap-2 flex-wrap min-w-0">
-                      <p className="font-mono text-lg font-bold text-foreground truncate">{timer.nr || 'Registrazione'}</p>
+                      {timer.assistenzaId && onOpenAssistenza ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenAssistenza(timer.assistenzaId!)}
+                          title="Apri dettaglio registrazione"
+                          className="group inline-flex items-center gap-1.5 rounded-full bg-gradient-to-b from-white to-primary-50 border border-primary-200 px-4 py-2 shadow-sm hover:shadow-md hover:from-primary-50 hover:to-primary-100 active:translate-y-px transition-all duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary-300"
+                        >
+                          <span className="font-mono text-base font-bold text-primary-700">{timer.nr || 'Registrazione'}</span>
+                          <ExternalLink className="w-4 h-4 text-primary-500 group-hover:text-primary-700 transition-colors" />
+                        </button>
+                      ) : (
+                        <p className="font-mono text-lg font-bold text-foreground truncate">{timer.nr || 'Registrazione'}</p>
+                      )}
                       {timer.status === 'paused' ? (
                         <span className="px-3 py-1 rounded-full bg-orange-100 text-orange-700 text-sm font-bold tracking-wide border border-orange-200 whitespace-nowrap">
                           IN PAUSA

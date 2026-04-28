@@ -15,7 +15,7 @@ interface MapWidgetProps {
 }
 
 export default function MapWidget({ indirizzo, onChange }: MapWidgetProps) {
-  const [showMap, setShowMap] = useState(false);
+  const [showMap, setShowMap] = useState(true);
   const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number } | null>(null);
   const [suggestions, setSuggestions] = useState<NominatimResult[]>([]);
   const [inputFocused, setInputFocused] = useState(false);
@@ -68,19 +68,53 @@ export default function MapWidget({ indirizzo, onChange }: MapWidgetProps) {
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
-  const mapSrc = useMemo(() => {
-    if (mapCenter) {
-      return `https://www.google.com/maps?q=${mapCenter.lat},${mapCenter.lng}&z=15&output=embed`;
+  // Auto-geocoding: centra la mappa sull'indirizzo appena disponibile/cambia
+  useEffect(() => {
+    const trimmed = indirizzo.trim();
+    if (!trimmed || mapCenter) return;
+
+    const key = trimmed.toLowerCase();
+    const cached = cacheRef.current.get(key);
+    if (cached?.[0]) {
+      setMapCenter({ lat: parseFloat(cached[0].lat), lng: parseFloat(cached[0].lon) });
+      return;
     }
 
-    return 'https://www.google.com/maps?ll=45.5877,10.1580&z=3&output=embed';
-  }, [mapCenter]);
+    const handle = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&countrycodes=it&limit=1&q=${encodeURIComponent(trimmed)}`,
+          { headers: { 'Accept-Language': 'it' } }
+        );
+        const data = (await res.json()) as NominatimResult[];
+        if (data[0]) {
+          cacheRef.current.set(key, data);
+          setMapCenter({ lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) });
+        }
+      } catch {
+        // l'iframe userà comunque la query testuale come fallback
+      }
+    }, 300);
+
+    return () => clearTimeout(handle);
+  }, [indirizzo, mapCenter]);
+
+  const mapSrc = useMemo(() => {
+    if (mapCenter) {
+      return `https://maps.google.com/maps?q=${mapCenter.lat},${mapCenter.lng}&t=&z=15&ie=UTF8&iwloc=&output=embed`;
+    }
+
+    if (indirizzo.trim()) {
+      return `https://maps.google.com/maps?q=${encodeURIComponent(indirizzo.trim())}&t=&z=15&ie=UTF8&iwloc=&output=embed`;
+    }
+
+    return 'https://maps.google.com/maps?ll=45.5877,10.1580&z=3&output=embed';
+  }, [mapCenter, indirizzo]);
 
   const openMap = useCallback(async () => {
     if (!indirizzo.trim()) return;
 
     setShowMap(true);
-    if (mapCenter) return;
 
     const key = indirizzo.trim().toLowerCase();
     const cached = cacheRef.current.get(key);
@@ -102,9 +136,9 @@ export default function MapWidget({ indirizzo, onChange }: MapWidgetProps) {
         setMapCenter({ lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) });
       }
     } catch {
-      addToast({ title: 'Mappa non disponibile', description: 'Impossibile geolocalizzare l’indirizzo', color: 'warning' });
+      addToast({ title: 'Geocoding non disponibile', description: 'Mostro la mappa con ricerca testuale', color: 'warning' });
     }
-  }, [indirizzo, mapCenter]);
+  }, [indirizzo]);
 
   return (
     <Card shadow="sm" className="bg-white">
@@ -120,7 +154,6 @@ export default function MapWidget({ indirizzo, onChange }: MapWidgetProps) {
               onChange={(e) => {
                 const val = e.target.value;
                 onChange(val);
-                setShowMap(false);
                 setMapCenter(null);
                 searchAddress(val);
               }}
@@ -172,7 +205,7 @@ export default function MapWidget({ indirizzo, onChange }: MapWidgetProps) {
         {(showMap || mapCenter) && (
           <div className="w-full rounded-lg overflow-hidden border border-centoraggi-accent/20">
             <iframe
-              key={mapCenter ? `${mapCenter.lat},${mapCenter.lng}` : 'world'}
+              key={mapCenter ? `${mapCenter.lat},${mapCenter.lng}` : `addr:${indirizzo.trim()}`}
               title="Mappa luogo assistenza"
               width="100%"
               height="300"

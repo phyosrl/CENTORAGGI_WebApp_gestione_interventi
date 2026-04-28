@@ -17,9 +17,9 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-centoraggi-900 to-centoraggi-700 flex items-center justify-center p-4">
-      <Card shadow="lg" className="w-full max-w-sm">
-        <CardBody className="gap-6 p-8">
+    <div className="min-h-screen w-full bg-gradient-to-br from-centoraggi-900 to-centoraggi-700 flex items-center justify-center p-4">
+      <Card shadow="lg" className="w-full max-w-sm min-w-[280px]">
+        <CardBody className="gap-6 p-8 w-full">
           <div className="text-center">
             <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-centoraggi-fresh text-white font-bold text-2xl mx-auto">
               C

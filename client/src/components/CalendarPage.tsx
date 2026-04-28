@@ -74,15 +74,22 @@ export default function CalendarPage({ risorsaId, onOpen, onCreateNew }: Calenda
       if (!rifAssistenzeList || rifAssistenzeList.length === 0) return mapped;
       const rifIndex = new Map(rifAssistenzeList.map((r) => [r.phyo_assistenzeid, r]));
       return mapped.map((a) => {
-        if (a.clienteNome || !a.rifAssistenzaId) return a;
+        if (!a.rifAssistenzaId) return a;
         const rif = rifIndex.get(a.rifAssistenzaId);
         if (!rif) return a;
         const clienteNome = rif['_phyo_cliente_value@OData.Community.Display.V1.FormattedValue'] || '';
-        if (!clienteNome) return a;
+        const tipologiaFromRif = rif['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue'] || '';
+        const indirizzoFromRif = rif.phyo_indirizzoassistenza || '';
+        const needsCliente = !a.clienteNome && !!clienteNome;
+        const needsTipologia = !a.tipologiaAssistenza && !!tipologiaFromRif;
+        const needsIndirizzo = !a.indirizzoAssistenza && !!indirizzoFromRif;
+        if (!needsCliente && !needsTipologia && !needsIndirizzo) return a;
         return {
           ...a,
           clienteId: a.clienteId ?? rif._phyo_cliente_value ?? null,
-          clienteNome,
+          clienteNome: needsCliente ? clienteNome : a.clienteNome,
+          tipologiaAssistenza: needsTipologia ? tipologiaFromRif : a.tipologiaAssistenza,
+          indirizzoAssistenza: needsIndirizzo ? indirizzoFromRif : a.indirizzoAssistenza,
         };
       });
     },
@@ -282,6 +289,12 @@ export default function CalendarPage({ risorsaId, onOpen, onCreateNew }: Calenda
                                 >
                                   <p className="truncate font-semibold">{event.nr || event.rifAssistenzaNome || 'Assistenza'}</p>
                                   <p className="truncate text-default-500">{event.clienteNome || event.tipologiaAssistenza || 'Nessuna descrizione'}</p>
+                                  {event.nr && event.rifAssistenzaNome && (
+                                    <p className="truncate text-[10px] text-default-400">Rif. {event.rifAssistenzaNome}</p>
+                                  )}
+                                  {event.tipologiaAssistenza && (
+                                    <p className="truncate text-[10px] text-default-400">{event.tipologiaAssistenza}</p>
+                                  )}
                                 </div>
                               ))}
                               {events.length > maxEvents && (

@@ -367,7 +367,15 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
         a.tipologiaAssistenza ||
         rif['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue'] ||
         '';
-      if (clienteNome === a.clienteNome && tipologiaAssistenza === a.tipologiaAssistenza) {
+      const indirizzoAssistenza =
+        a.indirizzoAssistenza ||
+        rif.phyo_indirizzoassistenza ||
+        '';
+      if (
+        clienteNome === a.clienteNome &&
+        tipologiaAssistenza === a.tipologiaAssistenza &&
+        indirizzoAssistenza === a.indirizzoAssistenza
+      ) {
         return a;
       }
       return {
@@ -375,6 +383,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
         clienteId: a.clienteId ?? rif._phyo_cliente_value ?? null,
         clienteNome,
         tipologiaAssistenza,
+        indirizzoAssistenza,
       };
     });
   }, [rawData, rifAssistenzeList]);

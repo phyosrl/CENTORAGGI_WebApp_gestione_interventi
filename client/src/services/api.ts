@@ -99,6 +99,8 @@ export interface UpdateAssistenzaPayload {
   phyo_descrizioneintervento?: string | null;
   phyo_materialeutilizzato?: string | null;
   phyo_totale?: string | null;
+  phyo_note?: string | null;
+  phyo_costoorario?: number | null;
   _phyo_rifassistenza_value?: string | null;
   _phyo_cliente_value?: string | null;
   phyo_tipologia_assistenza?: number | null;
@@ -121,6 +123,8 @@ export interface CreateAssistenzaPayload {
   phyo_descrizioneintervento?: string | null;
   phyo_materialeutilizzato?: string | null;
   phyo_totale?: string | null;
+  phyo_note?: string | null;
+  phyo_costoorario?: number | null;
   phyo_data?: string | null;
   _phyo_risorsa_value: string;
   _phyo_rifassistenza_value?: string | null;
