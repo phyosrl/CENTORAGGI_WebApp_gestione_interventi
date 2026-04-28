@@ -321,6 +321,77 @@ export class DataverseService {
     );
   }
 
+  /**
+   * Recupera le opzioni del campo phyo_tipologia_assistenza (Choice / Picklist)
+   * della tabella phyo_assistenze. Restituisce un array di { value, label }.
+   */
+  async getTipologiaAssistenzaOptions(): Promise<Array<{ value: number; label: string }>> {
+    const token = await this.getAccessToken();
+    const url =
+      `/api/data/v9.2/EntityDefinitions(LogicalName='phyo_assistenze')` +
+      `/Attributes(LogicalName='phyo_tipologia_assistenza')` +
+      `/Microsoft.Dynamics.CRM.PicklistAttributeMetadata` +
+      `?$select=LogicalName&$expand=OptionSet($select=Options)`;
+    try {
+      const response = await this.client.get(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const options: any[] = response.data?.OptionSet?.Options ?? [];
+      return options.map((o) => ({
+        value: Number(o.Value),
+        label:
+          o?.Label?.UserLocalizedLabel?.Label ||
+          o?.Label?.LocalizedLabels?.[0]?.Label ||
+          String(o.Value),
+      }));
+    } catch (error: any) {
+      console.error(
+        'getTipologiaAssistenzaOptions failed:',
+        error?.response?.data || error?.message || error
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Recupera l'elenco degli attributi obbligatori (RequiredLevel = ApplicationRequired
+   * o SystemRequired) per una entità Dataverse, per pilotare la validazione lato client.
+   * Esclude attributi tecnici / sistemici per essere utilizzabili direttamente nel form.
+   */
+  async getRequiredAttributes(
+    entityLogicalName: string
+  ): Promise<Array<{ logicalName: string; displayName: string; requiredLevel: string }>> {
+    const token = await this.getAccessToken();
+    const url =
+      `/api/data/v9.2/EntityDefinitions(LogicalName='${entityLogicalName}')` +
+      `/Attributes` +
+      `?$select=LogicalName,DisplayName,RequiredLevel,AttributeOf,IsCustomAttribute,IsValidForCreate` +
+      `&$filter=RequiredLevel/Value eq 'ApplicationRequired' or RequiredLevel/Value eq 'SystemRequired'`;
+    try {
+      const response = await this.client.get(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const items: any[] = response.data?.value ?? [];
+      // Filtra: solo attributi creabili dall'utente, escludi field tecnici (AttributeOf indica un campo derivato)
+      return items
+        .filter((a) => a.IsValidForCreate !== false && !a.AttributeOf)
+        .map((a) => ({
+          logicalName: a.LogicalName,
+          displayName:
+            a?.DisplayName?.UserLocalizedLabel?.Label ||
+            a?.DisplayName?.LocalizedLabels?.[0]?.Label ||
+            a.LogicalName,
+          requiredLevel: a?.RequiredLevel?.Value || 'None',
+        }));
+    } catch (error: any) {
+      console.error(
+        'getRequiredAttributes failed:',
+        error?.response?.data || error?.message || error
+      );
+      throw error;
+    }
+  }
+
   async getAccounts(): Promise<any[]> {
     return this.query(
       'accounts',

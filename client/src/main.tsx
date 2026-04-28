@@ -4,8 +4,12 @@ import App from './App.tsx';
 import './index.css';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { enableSmoothScroll } from './smoothScroll';
+import { startQueueFlusher } from './services/offlineQueue';
+import { registerServiceWorker } from './serviceWorkerRegistration';
 
 enableSmoothScroll();
+startQueueFlusher();
+registerServiceWorker();
 
 const queryClient = new QueryClient({
   defaultOptions: {

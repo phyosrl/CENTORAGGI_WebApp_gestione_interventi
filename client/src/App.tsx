@@ -12,6 +12,7 @@ import ActiveTimersPanel from './components/ActiveTimersPanel';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AssistenzaRegistrazione, AssistenzaRegistrazioneRaw, mapAssistenzaRegistrazione } from './types/assistenzaRegistrazione';
 import { getActiveTimers } from './services/timerStore';
+import { getQueueSize, flushQueue } from './services/offlineQueue';
 
 type View = { type: 'calendar' } | { type: 'list' } | { type: 'edit'; assistenza: AssistenzaRegistrazione } | { type: 'create' };
 
@@ -21,9 +22,13 @@ function AppContent() {
   const [view, setView] = useState<View>({ type: 'calendar' });
   const [previousView, setPreviousView] = useState<'calendar' | 'list'>('calendar');
   const [isOnline, setIsOnline] = useState(typeof window === 'undefined' ? true : window.navigator.onLine);
+  const [pendingQueue, setPendingQueue] = useState(0);
 
   useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
+    const handleOnline = () => {
+      setIsOnline(true);
+      void flushQueue();
+    };
     const handleOffline = () => setIsOnline(false);
 
     window.addEventListener('online', handleOnline);
@@ -31,6 +36,24 @@ function AppContent() {
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      void getQueueSize().then((size) => {
+        if (!cancelled) setPendingQueue(size);
+      }).catch(() => { /* IndexedDB non disponibile: ignora */ });
+    };
+    refresh();
+    const onChange = () => refresh();
+    window.addEventListener('offline-queue:change', onChange);
+    window.addEventListener('offline-queue:flushed', onChange);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('offline-queue:change', onChange);
+      window.removeEventListener('offline-queue:flushed', onChange);
     };
   }, []);
 
@@ -108,6 +131,16 @@ function AppContent() {
       {!isOnline && (
         <div className="bg-warning-100 text-warning-800 text-center text-sm px-4 py-2 border-b border-warning-300">
           Modalità offline attiva: vedi i dati salvati localmente e potrai riprendere appena torna la connessione.
+          {pendingQueue > 0 && (
+            <span className="ml-2 font-semibold">
+              {pendingQueue} {pendingQueue === 1 ? 'modifica' : 'modifiche'} in coda.
+            </span>
+          )}
+        </div>
+      )}
+      {isOnline && pendingQueue > 0 && (
+        <div className="bg-primary-100 text-primary-800 text-center text-sm px-4 py-2 border-b border-primary-300">
+          Sincronizzazione in corso: {pendingQueue} {pendingQueue === 1 ? 'modifica' : 'modifiche'} da inviare…
         </div>
       )}
 

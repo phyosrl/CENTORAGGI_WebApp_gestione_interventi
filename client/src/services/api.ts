@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { CommessaRaw } from '../types/commessa';
 import { AssistenzaRegistrazioneRaw } from '../types/assistenzaRegistrazione';
+import { enqueue, flushQueue } from './offlineQueue';
 
 const STORAGE_KEY = 'centoraggi_user';
 
@@ -28,13 +29,76 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// Metodi mutanti che vengono accodati quando offline / errore di rete.
+// I POST (create) NON sono accodati perché il chiamante necessita dell'id
+// di ritorno; restano errori "online-only" gestiti a livello di UI.
+const QUEUEABLE_METHODS = new Set(['patch', 'delete', 'put']);
+
+function isOfflineOrNetworkError(error: unknown): boolean {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return true;
+  if (axios.isAxiosError(error)) {
+    if (!error.response) return true; // request did not reach the server
+    if (error.code === 'ERR_NETWORK') return true;
+  }
+  return false;
+}
+
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     if (typeof window !== 'undefined' && error?.response?.status === 401) {
       sessionStorage.removeItem(STORAGE_KEY);
       window.dispatchEvent(new CustomEvent('auth:expired'));
+      return Promise.reject(error);
     }
+
+    const cfg = error?.config as
+      | { method?: string; url?: string; data?: unknown; params?: Record<string, unknown>; headers?: Record<string, string>; baseURL?: string; __offlineQueued?: boolean }
+      | undefined;
+    const method = (cfg?.method ?? '').toLowerCase();
+
+    if (
+      cfg &&
+      !cfg.__offlineQueued &&
+      QUEUEABLE_METHODS.has(method) &&
+      isOfflineOrNetworkError(error)
+    ) {
+      try {
+        // Normalizza il body: se è una stringa JSON serializzata da axios,
+        // la salviamo così com'è; altrimenti memorizziamo l'oggetto.
+        let data = cfg.data;
+        if (typeof data === 'string') {
+          try { data = JSON.parse(data); } catch { /* keep as-is */ }
+        }
+        await enqueue(
+          {
+            url: cfg.url ?? '',
+            method,
+            data,
+            params: cfg.params,
+            headers: cfg.headers,
+            baseURL: cfg.baseURL,
+          },
+          `${method.toUpperCase()} ${cfg.url ?? ''}`
+        );
+        // Tentativo di flush opportunistico (può rientrare la rete a breve)
+        if (typeof navigator !== 'undefined' && navigator.onLine) {
+          setTimeout(() => { void flushQueue(); }, 2000);
+        }
+        // Risposta sintetica "accettata": il chiamante prosegue come se ok.
+        return {
+          data: { success: true, queued: true },
+          status: 202,
+          statusText: 'Accepted (queued offline)',
+          headers: {},
+          config: cfg,
+          request: undefined,
+        };
+      } catch (queueErr) {
+        console.error('[api] enqueue failed:', queueErr);
+      }
+    }
+
     return Promise.reject(error);
   }
 );
@@ -159,6 +223,31 @@ export interface Account {
 
 export async function fetchAccounts(): Promise<Account[]> {
   const { data } = await api.get<{ success: boolean; data: Account[] }>('/dataverse/accounts');
+  return data.data;
+}
+
+export interface TipologiaAssistenzaOption {
+  value: number;
+  label: string;
+}
+
+export async function fetchTipologieAssistenza(): Promise<TipologiaAssistenzaOption[]> {
+  const { data } = await api.get<{ success: boolean; data: TipologiaAssistenzaOption[] }>(
+    '/dataverse/tipologie-assistenza'
+  );
+  return data.data;
+}
+
+export interface RequiredField {
+  logicalName: string;
+  displayName: string;
+  requiredLevel: string;
+}
+
+export async function fetchRequiredFieldsAssistenza(): Promise<RequiredField[]> {
+  const { data } = await api.get<{ success: boolean; data: RequiredField[] }>(
+    '/dataverse/assistenze/required-fields'
+  );
   return data.data;
 }
 

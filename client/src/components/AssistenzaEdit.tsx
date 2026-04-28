@@ -12,6 +12,7 @@ import {
   RotateCcw,
   Trash2,
   Save,
+  X,
 } from 'lucide-react';
 import {
   Card,
@@ -22,10 +23,12 @@ import {
   Chip,
   Select,
   SelectItem,
+  Autocomplete,
+  AutocompleteItem,
   addToast,
 } from '@heroui/react';
 import { AssistenzaRegistrazione } from '../types/assistenzaRegistrazione';
-import { updateAssistenza, UpdateAssistenzaPayload, createAssistenza, CreateAssistenzaPayload, fetchAccounts, fetchRifAssistenze, fetchImages, uploadImage, deleteImage, Annotation, geocodeAddress, GeocodeResult } from '../services/api';
+import { updateAssistenza, UpdateAssistenzaPayload, createAssistenza, CreateAssistenzaPayload, fetchAccounts, fetchRifAssistenze, fetchTipologieAssistenza, fetchRequiredFieldsAssistenza, fetchImages, uploadImage, deleteImage, Annotation, geocodeAddress, GeocodeResult } from '../services/api';
 import { getActiveTimer, removeActiveTimer, upsertActiveTimer } from '../services/timerStore';
 import AssistenzaImagesSection from './assistenza/AssistenzaImagesSection';
 import SignatureWidget, { SIGNATURE_SUBJECT } from './assistenza/SignatureWidget';
@@ -95,6 +98,13 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>(isCreate ? 'idle' : 'saved');
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(isCreate ? null : new Date());
   const [saveClockTick, setSaveClockTick] = useState(0);
+
+  // In modalità modifica i campi Cliente, Tipologia e Rif. Assistenza
+  // provenienti da Dataverse non possono essere alterati: si bloccano se
+  // sono già valorizzati. In creazione (isCreate) restano sempre modificabili.
+  const lockCliente = !isCreate && !!assistenza?.clienteId;
+  const lockTipologia = !isCreate && !!assistenza?.tipologiaAssistenza;
+  const lockRifAssistenza = !isCreate && !!assistenza?.rifAssistenzaId;
 
   // Timer state
   const [timerStatus, setTimerStatus] = useState<'idle' | 'running' | 'paused' | 'stopped'>(existingTimer?.status ?? 'idle');
@@ -278,6 +288,18 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
     staleTime: 10 * 60 * 1000,
   });
 
+  const { data: tipologieOptions } = useQuery({
+    queryKey: ['tipologieAssistenza'],
+    queryFn: fetchTipologieAssistenza,
+    staleTime: 60 * 60 * 1000,
+  });
+
+  const { data: requiredFields } = useQuery({
+    queryKey: ['requiredFieldsAssistenza'],
+    queryFn: fetchRequiredFieldsAssistenza,
+    staleTime: 60 * 60 * 1000,
+  });
+
   const { data: rifAssistenzeList } = useQuery({
     queryKey: ['rifAssistenze'],
     queryFn: fetchRifAssistenze,
@@ -382,20 +404,35 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
     }
   }, [refetchImages]);
 
-  // Tipologie filtered by selected cliente / rif
+  // Tipologie sincronizzate da Dataverse (option set di phyo_tipologia_assistenza).
+  // Tutte le opzioni sono sempre selezionabili: il filtro avviene solo se
+  // l'utente sceglie un Numero Assistenza specifico (in tal caso si mostra la
+  // tipologia del rif scelto). Così è sempre possibile creare una nuova
+  // registrazione anche per clienti senza Rif. Assistenza esistenti.
+  // Se l'option set non è disponibile (es. endpoint metadata non accessibile),
+  // si ricade sulle label distinte presenti nei Rif. Assistenza.
   const tipologie = useMemo(() => {
-    if (!rifAssistenzeList) return [];
     const set = new Set<string>();
-    for (const rif of rifAssistenzeList) {
-      if (clienteId && rif._phyo_cliente_value !== clienteId) continue;
-      if (rifAssistenzaId && rif.phyo_assistenzeid !== rifAssistenzaId) continue;
-      const t = rif['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue'] || '';
+    if (rifAssistenzaId && rifAssistenzeList) {
+      const rif = rifAssistenzeList.find((r) => r.phyo_assistenzeid === rifAssistenzaId);
+      const t = rif?.['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue'] || '';
       if (t) set.add(t);
+    } else {
+      for (const opt of tipologieOptions ?? []) {
+        if (opt.label) set.add(opt.label);
+      }
+      // Fallback: se non sono disponibili le opzioni dal metadata,
+      // estrai le tipologie distinte dai Rif. Assistenza esistenti.
+      if (set.size === 0 && rifAssistenzeList) {
+        for (const rif of rifAssistenzeList) {
+          const t = rif['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue'] || '';
+          if (t) set.add(t);
+        }
+      }
     }
-    // always include currently selected tipologia
-    if (tipologia) set.add(tipologia);
+    if (tipologia) set.add(tipologia); // mantieni il valore corrente
     return Array.from(set).sort();
-  }, [rifAssistenzeList, clienteId, rifAssistenzaId, tipologia]);
+  }, [tipologieOptions, rifAssistenzeList, rifAssistenzaId, tipologia]);
 
   useEffect(() => {
     if (!lastSavedAt) return;
@@ -416,34 +453,34 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
     return `${hours} h fa`;
   }, [lastSavedAt, saveClockTick]);
 
-  // Clienti filtered by selected tipologia / rif
+  // Clienti: si filtra unicamente quando è stato scelto un Numero Assistenza
+  // specifico (in quel caso il cliente è quello del rif selezionato).
+  // Negli altri casi tutti i clienti sono selezionabili, perché deve essere
+  // possibile creare una nuova registrazione anche per clienti senza rif.
   const filteredAccounts = useMemo(() => {
     if (!accountsList) return [];
-    if (!rifAssistenzeList || (!tipologia && !rifAssistenzaId)) return accountsList;
+    if (!rifAssistenzaId || !rifAssistenzeList) return accountsList;
+    const rif = rifAssistenzeList.find((r) => r.phyo_assistenzeid === rifAssistenzaId);
     const allowed = new Set<string>();
-    for (const rif of rifAssistenzeList) {
-      if (tipologia && (rif['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue'] || '') !== tipologia) continue;
-      if (rifAssistenzaId && rif.phyo_assistenzeid !== rifAssistenzaId) continue;
-      if (rif._phyo_cliente_value) allowed.add(rif._phyo_cliente_value);
-    }
-    // always include currently selected cliente
+    if (rif?._phyo_cliente_value) allowed.add(rif._phyo_cliente_value);
     if (clienteId) allowed.add(clienteId);
+    if (allowed.size === 0) return accountsList;
     return accountsList.filter((a) => allowed.has(a.accountid));
-  }, [accountsList, rifAssistenzeList, tipologia, rifAssistenzaId, clienteId]);
+  }, [accountsList, rifAssistenzeList, rifAssistenzaId, clienteId]);
 
-  // Filter rif assistenze by selected cliente and tipologia
+  // Rif. Assistenza filtrati strettamente per cliente / tipologia selezionati.
   const filteredRifAssistenze = useMemo(() => {
     if (!rifAssistenzeList) return [];
-    let list = rifAssistenzeList;
-    if (clienteId) {
-      list = list.filter((rif) => rif._phyo_cliente_value === clienteId);
-    }
-    if (tipologia) {
-      list = list.filter(
-        (rif) => (rif['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue'] || '') === tipologia
-      );
-    }
-    return list;
+    return rifAssistenzeList.filter((rif) => {
+      if (clienteId && rif._phyo_cliente_value !== clienteId) return false;
+      if (
+        tipologia &&
+        (rif['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue'] || '') !== tipologia
+      ) {
+        return false;
+      }
+      return true;
+    });
   }, [rifAssistenzeList, clienteId, tipologia]);
 
   const updateMutation = useMutation({
@@ -459,16 +496,22 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
   const isPending = updateMutation.isPending || createMutation.isPending;
 
   const buildBasePayload = useCallback(() => {
-    // Risolve la label tipologia nel valore numerico dell'option set,
-    // cercando un Rif. Assistenza con la stessa FormattedValue.
+    // Risolve la label tipologia nel valore numerico dell'option set:
+    // 1) prima dall'option set sincronizzato con Dataverse (sorgente principale);
+    // 2) come fallback, da un Rif. Assistenza con la stessa FormattedValue.
     let tipologiaValue: number | null = null;
-    if (tipologia && rifAssistenzeList) {
-      const match = rifAssistenzeList.find(
-        (r) => (r['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue'] || '') === tipologia
-      );
-      const raw = match?.phyo_tipologia_assistenza;
-      if (typeof raw === 'number') tipologiaValue = raw;
-      else if (typeof raw === 'string' && raw.trim() !== '' && !Number.isNaN(Number(raw))) tipologiaValue = Number(raw);
+    if (tipologia) {
+      const fromOptions = tipologieOptions?.find((o) => o.label === tipologia);
+      if (fromOptions) {
+        tipologiaValue = fromOptions.value;
+      } else if (rifAssistenzeList) {
+        const match = rifAssistenzeList.find(
+          (r) => (r['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue'] || '') === tipologia
+        );
+        const raw = match?.phyo_tipologia_assistenza;
+        if (typeof raw === 'number') tipologiaValue = raw;
+        else if (typeof raw === 'string' && raw.trim() !== '' && !Number.isNaN(Number(raw))) tipologiaValue = Number(raw);
+      }
     }
     return {
       phyo_attne: attne || null,
@@ -486,7 +529,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
       _phyo_rifassistenza_value: rifAssistenzaId || null,
       phyo_tipologia_assistenza: tipologiaValue,
     };
-  }, [attne, oreIntervento, ore, descrizione, materiale, note, costoOrario, totale, clienteId, rifAssistenzaId, tipologia, rifAssistenzeList]);
+  }, [attne, oreIntervento, ore, descrizione, materiale, note, costoOrario, totale, clienteId, rifAssistenzaId, tipologia, rifAssistenzeList, tipologieOptions]);
 
   const buildUpdatePayload = useCallback((): UpdateAssistenzaPayload => ({
     ...buildBasePayload(),
@@ -531,14 +574,79 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
     };
   }, [isCreate, updatePayloadSignature, buildUpdatePayload, updateMutation, queryClient]);
 
+  /**
+   * Mappa i logicalName Dataverse -> { label, isFilled } per i soli campi gestiti
+   * dal form di registrazione. I campi obbligatori che NON appaiono qui (es. ownerid,
+   * statecode, statuscode, phyo_nr — generato lato server, phyo_risorsa — auto dal token)
+   * vengono ignorati perché compilati automaticamente dal backend.
+   */
+  const formFieldByLogicalName = useMemo<Record<string, { label: string; isFilled: () => boolean }>>(() => ({
+    phyo_attne: { label: 'Att.ne', isFilled: () => attne.trim() !== '' },
+    phyo_oreintervento: { label: 'Ore intervento', isFilled: () => oreIntervento.trim() !== '' },
+    phyo_ore: { label: 'Ore', isFilled: () => ore.trim() !== '' },
+    phyo_descrizioneintervento: { label: 'Descrizione intervento', isFilled: () => descrizione.trim() !== '' },
+    phyo_materialeutilizzato: { label: 'Materiale utilizzato', isFilled: () => materiale.trim() !== '' },
+    phyo_note: { label: 'Note', isFilled: () => note.trim() !== '' },
+    phyo_costoorario: { label: 'Costo orario', isFilled: () => costoOrario.trim() !== '' },
+    phyo_totale: { label: 'Totale', isFilled: () => totale.trim() !== '' },
+    phyo_data: { label: 'Data', isFilled: () => !!data },
+    phyo_tipologia_assistenza: { label: 'Tipologia', isFilled: () => !!tipologia },
+    _phyo_cliente_value: { label: 'Cliente', isFilled: () => !!clienteId },
+    phyo_cliente: { label: 'Cliente', isFilled: () => !!clienteId },
+    _phyo_rifassistenza_value: { label: 'Rif. Assistenza', isFilled: () => !!rifAssistenzaId },
+    phyo_rifassistenza: { label: 'Rif. Assistenza', isFilled: () => !!rifAssistenzaId },
+  }), [attne, oreIntervento, ore, descrizione, materiale, note, costoOrario, totale, data, tipologia, clienteId, rifAssistenzaId]);
+
+  /**
+   * Set di logicalName Dataverse marcati come obbligatori e gestiti nel form,
+   * derivati dalla metadata EntityDefinitions di phyo_assistenzeregistrazioni.
+   */
+  const requiredFormFields = useMemo(() => {
+    if (!requiredFields) return [] as Array<{ logicalName: string; label: string; isFilled: () => boolean }>;
+    return requiredFields
+      .map((f) => {
+        const mapped = formFieldByLogicalName[f.logicalName];
+        if (!mapped) return null;
+        return { logicalName: f.logicalName, label: mapped.label, isFilled: mapped.isFilled };
+      })
+      .filter((x): x is { logicalName: string; label: string; isFilled: () => boolean } => x !== null);
+  }, [requiredFields, formFieldByLogicalName]);
+
+  const isFieldRequired = useCallback(
+    (logicalName: string) => requiredFormFields.some((f) => f.logicalName === logicalName),
+    [requiredFormFields]
+  );
+
   const handleSave = async (opts?: { closeAfterSave?: boolean; manual?: boolean }) => {
     const closeAfterSave = opts?.closeAfterSave ?? false;
     const manual = opts?.manual ?? false;
 
     if (isCreate) {
+      // Validazione: usa SOLO i campi obbligatori dichiarati nella metadata Dataverse
+      const missing = requiredFormFields.filter((f) => !f.isFilled()).map((f) => f.label);
+      // dedup (cliente/rif compaiono con due logicalName)
+      const missingUnique = Array.from(new Set(missing));
+      if (missingUnique.length > 0) {
+        addToast({
+          title: 'Campi obbligatori mancanti',
+          description: `Compila: ${missingUnique.join(', ')}`,
+          color: 'warning',
+        });
+        return;
+      }
+
       try {
+        const basePayload = buildBasePayload();
+        if (isFieldRequired('phyo_tipologia_assistenza') && basePayload.phyo_tipologia_assistenza == null) {
+          addToast({
+            title: 'Tipologia non valida',
+            description: 'Impossibile risolvere il valore della tipologia. Riprova ricaricando la pagina.',
+            color: 'warning',
+          });
+          return;
+        }
         const result = await createMutation.mutateAsync({
-          ...buildBasePayload(),
+          ...basePayload,
           phyo_data: data || null,
           _phyo_risorsa_value: props.risorsaId!,
         });
@@ -561,9 +669,17 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
         });
         onBack();
       } catch (err: any) {
+        const serverData = err?.response?.data;
+        const detail =
+          (typeof serverData?.message === 'string' && serverData.message) ||
+          (typeof serverData?.message?.message === 'string' && serverData.message.message) ||
+          (typeof serverData?.error === 'string' && serverData.error) ||
+          err?.message ||
+          'Creazione fallita';
+        console.error('[createAssistenza] errore:', serverData ?? err);
         addToast({
-          title: 'Errore',
-          description: err?.response?.data?.error || 'Creazione fallita',
+          title: 'Errore creazione',
+          description: detail,
           color: 'danger',
         });
       }
@@ -703,15 +819,17 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
           <p className="text-xs font-semibold text-centoraggi-primary uppercase tracking-wider">Assegnazione</p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            <Select
+            <Autocomplete
               label="Cliente"
-              placeholder="Seleziona cliente..."
+              placeholder="Cerca cliente per nome..."
               variant="bordered"
-              selectedKeys={clienteId ? [clienteId] : []}
-              onSelectionChange={(keys) => {
-                const selected = Array.from(keys)[0] as string | undefined;
-                setClienteId(selected ?? '');
-                // if current rif no longer matches cliente, clear it
+              isRequired={isCreate && (isFieldRequired('_phyo_cliente_value') || isFieldRequired('phyo_cliente'))}
+              selectedKey={clienteId || null}
+              isDisabled={lockCliente}
+              onSelectionChange={(key) => {
+                const selected = (key as string | null) ?? '';
+                setClienteId(selected);
+                // se il rif corrente non appartiene più al nuovo cliente, lo svuoto
                 if (selected && rifAssistenzaId && rifAssistenzeList) {
                   const rif = rifAssistenzeList.find((r) => r.phyo_assistenzeid === rifAssistenzaId);
                   if (rif && rif._phyo_cliente_value !== selected) {
@@ -720,19 +838,23 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
                 }
               }}
               className="sm:col-span-2"
-              classNames={{ trigger: 'bg-[#FAFBFC]' }}
+              inputProps={{ classNames: { inputWrapper: 'bg-[#FAFBFC]' } }}
+              isClearable
+              defaultItems={filteredAccounts}
             >
-              {filteredAccounts.map((acc) => (
-                <SelectItem key={acc.accountid}>
+              {(acc) => (
+                <AutocompleteItem key={acc.accountid} textValue={acc.name}>
                   {acc.name}
-                </SelectItem>
-              ))}
-            </Select>
+                </AutocompleteItem>
+              )}
+            </Autocomplete>
             <Select
               label="Tipologia"
               placeholder="Seleziona tipologia..."
               variant="bordered"
+              isRequired={isCreate && isFieldRequired('phyo_tipologia_assistenza')}
               selectedKeys={tipologia ? [tipologia] : []}
+              isDisabled={lockTipologia}
               onSelectionChange={(keys) => {
                 const selected = Array.from(keys)[0] as string | undefined;
                 setTipologia(selected ?? '');
@@ -747,6 +869,22 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
               }}
               className="sm:col-span-2"
               classNames={{ trigger: 'bg-[#FAFBFC]' }}
+              endContent={
+                tipologia && !lockTipologia ? (
+                  <button
+                    type="button"
+                    aria-label="Rimuovi tipologia"
+                    className="mr-1 rounded-full p-0.5 text-default-400 hover:text-default-600 hover:bg-default-100"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setTipologia('');
+                    }}
+                  >
+                    <X size={14} />
+                  </button>
+                ) : null
+              }
             >
               {tipologie.map((t) => (
                 <SelectItem key={t}>
@@ -758,7 +896,9 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
               label="Rif. Assistenza"
               placeholder="Seleziona assistenza..."
               variant="bordered"
+              isRequired={isCreate && (isFieldRequired('_phyo_rifassistenza_value') || isFieldRequired('phyo_rifassistenza'))}
               selectedKeys={rifAssistenzaId ? [rifAssistenzaId] : []}
+              isDisabled={lockRifAssistenza}
               onSelectionChange={(keys) => {
                 const selected = Array.from(keys)[0] as string | undefined;
                 setRifAssistenzaId(selected ?? '');
@@ -783,6 +923,22 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
               }}
               className="sm:col-span-2"
               classNames={{ trigger: 'bg-[#FAFBFC]' }}
+              endContent={
+                rifAssistenzaId && !lockRifAssistenza ? (
+                  <button
+                    type="button"
+                    aria-label="Rimuovi riferimento assistenza"
+                    className="mr-1 rounded-full p-0.5 text-default-400 hover:text-default-600 hover:bg-default-100"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setRifAssistenzaId('');
+                    }}
+                  >
+                    <X size={14} />
+                  </button>
+                ) : null
+              }
             >
               {filteredRifAssistenze.map((rif) => (
                 <SelectItem key={rif.phyo_assistenzeid} textValue={rif.phyo_nrassistenze}>
@@ -814,6 +970,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
                 value={data}
                 onValueChange={setData}
                 variant="bordered"
+                isRequired={isCreate && isFieldRequired('phyo_data')}
                 type="date"
                 classNames={{ inputWrapper: 'bg-[#FAFBFC]' }}
               />
@@ -1125,18 +1282,34 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
         </CardBody>
       </Card>
 
-      {/* Floating back-to-top */}
-      <Button
-        isIconOnly
-        size="lg"
-        radius="full"
-        color="primary"
-        aria-label="Torna all'inizio"
-        onPress={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-        className="fixed bottom-5 right-24 md:right-5 z-40 shadow-lg bg-centoraggi-primary"
+      {/* Floating Save (Crea) + back-to-top — il Save sta a sinistra della freccia */}
+      <div
+        className="fixed bottom-5 right-24 md:right-5 z-50 flex items-center gap-2 pointer-events-none"
+        style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 1.25rem)' }}
       >
-        <ArrowUp className="w-5 h-5" />
-      </Button>
+        <Button
+          size="lg"
+          color="primary"
+          onPress={() => handleSave({ closeAfterSave: isCreate, manual: true })}
+          isLoading={isPending}
+          className="pointer-events-auto font-semibold bg-centoraggi-primary shadow-lg shadow-black/20"
+          startContent={!isPending ? <Save className="w-5 h-5" /> : undefined}
+          aria-label={isCreate ? 'Crea registrazione' : 'Salva registrazione'}
+        >
+          {isCreate ? 'Crea' : 'Salva'}
+        </Button>
+        <Button
+          isIconOnly
+          size="lg"
+          radius="full"
+          color="primary"
+          aria-label="Torna all'inizio"
+          onPress={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          className="pointer-events-auto shadow-lg bg-centoraggi-primary"
+        >
+          <ArrowUp className="w-5 h-5" />
+        </Button>
+      </div>
 
       {/* Floating timer FAB on mobile */}
       <div className="md:hidden fixed bottom-5 right-5 z-50">

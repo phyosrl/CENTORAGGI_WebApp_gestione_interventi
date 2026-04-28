@@ -195,12 +195,18 @@ export async function createAssistenza(request: HttpRequest): Promise<HttpRespon
       jsonBody: { success: true, id },
     };
   } catch (error: any) {
+    const dvError = error?.response?.data?.error;
+    const detail =
+      (typeof dvError?.message === 'string' && dvError.message) ||
+      (typeof error?.response?.data === 'string' && error.response.data) ||
+      error?.message ||
+      'Errore sconosciuto';
     console.error('Create error:', error?.response?.data || error?.message || error);
     return {
       status: 500,
       jsonBody: {
         error: 'Creazione fallita',
-        message: process.env.NODE_ENV === 'development' ? (error?.response?.data || error?.message) : undefined,
+        message: detail,
       },
     };
   }
@@ -251,6 +257,62 @@ app.http('getRifAssistenze', {
   authLevel: 'anonymous',
   route: 'dataverse/rifassistenze',
   handler: getRifAssistenze,
+});
+
+export async function getTipologiaAssistenzaOptions(
+  request: HttpRequest
+): Promise<HttpResponseInit> {
+  const auth = requireAuth(request);
+  if (auth.response) return auth.response;
+
+  try {
+    const items = await dataverseService.getTipologiaAssistenzaOptions();
+    return {
+      status: 200,
+      jsonBody: { success: true, data: items },
+    };
+  } catch (error: any) {
+    console.error('getTipologiaAssistenzaOptions error:', error?.message || error);
+    return {
+      status: 500,
+      jsonBody: { error: 'Failed to fetch tipologia assistenza options' },
+    };
+  }
+}
+
+app.http('getTipologiaAssistenzaOptions', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'dataverse/tipologie-assistenza',
+  handler: getTipologiaAssistenzaOptions,
+});
+
+export async function getRequiredFieldsAssistenza(
+  request: HttpRequest
+): Promise<HttpResponseInit> {
+  const auth = requireAuth(request);
+  if (auth.response) return auth.response;
+
+  try {
+    const items = await dataverseService.getRequiredAttributes('phyo_assistenzeregistrazioni');
+    return {
+      status: 200,
+      jsonBody: { success: true, data: items },
+    };
+  } catch (error: any) {
+    console.error('getRequiredFieldsAssistenza error:', error?.message || error);
+    return {
+      status: 500,
+      jsonBody: { error: 'Failed to fetch required fields' },
+    };
+  }
+}
+
+app.http('getRequiredFieldsAssistenza', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'dataverse/assistenze/required-fields',
+  handler: getRequiredFieldsAssistenza,
 });
 
 export async function getAccounts(request: HttpRequest): Promise<HttpResponseInit> {
