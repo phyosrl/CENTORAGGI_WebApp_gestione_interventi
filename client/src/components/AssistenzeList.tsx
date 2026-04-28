@@ -1,4 +1,16 @@
 import React, { useMemo, useState, useCallback, useRef, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { fadeInUp, staggerContainer, collapsibleSection } from './motion';
+import {
+  Search,
+  ChevronDown,
+  ClipboardList,
+  Wrench,
+  PauseCircle,
+  CheckCircle2,
+  FileText,
+  type LucideIcon,
+} from 'lucide-react';
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Table,
@@ -22,11 +34,13 @@ import {
   addToast,
 } from '@heroui/react';
 import { fetchAssistenzeRegistrazioni, updateAssistenza } from '../services/api';
+import { getActiveTimers } from '../services/timerStore';
 import {
   AssistenzaRegistrazioneRaw,
   AssistenzaRegistrazione,
   mapAssistenzaRegistrazione,
 } from '../types/assistenzaRegistrazione';
+import ListSkeleton from './skeletons/ListSkeleton';
 
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return '—';
@@ -70,11 +84,11 @@ const statoRegColor: Record<string, 'warning' | 'primary' | 'secondary' | 'dange
   'Chiuso': 'default',
 };
 
-const statoRegIcon: Record<string, string> = {
-  'Programmato': '📋',
-  'In lavorazione': '🔧',
-  'Sospeso': '⏸️',
-  'Chiuso': '✅',
+const statoRegIcon: Record<string, LucideIcon> = {
+  'Programmato': ClipboardList,
+  'In lavorazione': Wrench,
+  'Sospeso': PauseCircle,
+  'Chiuso': CheckCircle2,
 };
 
 interface AssistenzeListProps {
@@ -93,6 +107,28 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
   const [loadingAll, setLoadingAll] = useState(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
+
+  // Track which assistenze have a running timer in order to highlight their row
+  const [runningTimerIds, setRunningTimerIds] = useState<Set<string>>(() => {
+    return new Set(
+      getActiveTimers()
+        .filter((t) => t.status === 'running' && t.assistenzaId)
+        .map((t) => t.assistenzaId as string),
+    );
+  });
+  useEffect(() => {
+    const refresh = () => {
+      setRunningTimerIds(
+        new Set(
+          getActiveTimers()
+            .filter((t) => t.status === 'running' && t.assistenzaId)
+            .map((t) => t.assistenzaId as string),
+        ),
+      );
+    };
+    window.addEventListener('timers:changed', refresh);
+    return () => window.removeEventListener('timers:changed', refresh);
+  }, []);
 
   const statoMutation = useMutation({
     mutationFn: ({ id, stato }: { id: string; stato: number }) =>
@@ -133,11 +169,14 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
           aria-label="Cambia stato"
           onAction={(key) => handleQuickStatus(a.id, key as string)}
         >
-          {transitions.map((s) => (
-            <DropdownItem key={s} startContent={<span>{statoRegIcon[s]}</span>}>
-              {s}
-            </DropdownItem>
-          ))}
+          {transitions.map((s) => {
+            const Icon = statoRegIcon[s];
+            return (
+              <DropdownItem key={s} startContent={Icon ? <Icon className="w-4 h-4" /> : null}>
+                {s}
+              </DropdownItem>
+            );
+          })}
         </DropdownMenu>
       </Dropdown>
     );
@@ -321,14 +360,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
   }, []);
 
   if (isLoading) {
-    return (
-      <Card className="shadow-md">
-        <CardBody className="flex flex-col items-center justify-center py-24 gap-4">
-          <Spinner size="lg" color="primary" />
-          <p className="text-default-400 text-sm">Caricamento registrazioni...</p>
-        </CardBody>
-      </Card>
-    );
+    return <ListSkeleton rows={6} statsCount={4} />;
   }
 
   if (error) {
@@ -351,7 +383,12 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
   }
 
   return (
-    <div className="flex flex-col gap-4 sm:gap-6">
+    <motion.div
+      className="flex flex-col gap-4 sm:gap-6"
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+    >
       {/* Header + Stats */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         <div>
@@ -368,8 +405,9 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
         </Button>
       </div>
 
-      {/* View mode toggle */}
-      <div className="flex flex-col sm:flex-row gap-3">
+      {/* View mode toggle + filtri (sticky in mobile) */}
+      <div className="sticky top-0 z-30 -mx-3 sm:-mx-4 px-3 sm:px-4 py-2 sm:py-0 bg-white/80 sm:bg-transparent backdrop-blur sm:backdrop-blur-0 border-b border-default-200/60 sm:border-0 sm:static">
+      <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
         <div className="flex gap-1 bg-default-100 rounded-lg p-1">
           <Button
             size="sm"
@@ -405,11 +443,8 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
           className="sm:flex-1"
           variant="bordered"
           size="sm"
-          startContent={
-            <svg className="w-4 h-4 text-default-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-          }
+          classNames={{ inputWrapper: 'h-10 min-h-10' }}
+          startContent={<Search className="w-4 h-4 text-default-400 flex-shrink-0" />}
         />
         <Select
           aria-label="Filtra per tipologia"
@@ -420,6 +455,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
           className="sm:w-56"
           variant="bordered"
           size="sm"
+          classNames={{ trigger: 'h-10 min-h-10' }}
           renderValue={(items) => {
             if (items.length === 0) return <span className="text-default-400">Tipologia</span>;
             if (items.length === 1) return <span className="truncate">{items[0].textValue ?? items[0].key}</span>;
@@ -435,6 +471,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
             size="sm"
             variant="flat"
             color="danger"
+            className="h-10"
             onPress={() => setTipologiaFilter(new Set())}
           >
             Reset tipologia
@@ -442,31 +479,39 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
         )}
         {(viewMode === 'grouped' || viewMode === 'manutenzioni') && (
           <div className="flex gap-2">
-            <Button size="sm" variant="flat" onPress={expandAll}>
+            <Button size="sm" variant="flat" className="h-10" onPress={expandAll}>
               Espandi tutto
             </Button>
-            <Button size="sm" variant="flat" onPress={collapseAll}>
+            <Button size="sm" variant="flat" className="h-10" onPress={collapseAll}>
               Comprimi tutto
             </Button>
           </div>
         )}
       </div>
+      </div>
 
       {/* Stats cards */}
-      <div className="flex gap-2 flex-wrap">
+      <motion.div
+        className="flex gap-2 flex-wrap"
+        variants={staggerContainer}
+        initial="hidden"
+        animate="visible"
+      >
         {grouped
           .filter((g) => viewMode !== 'manutenzioni' || (g.stato !== 'Chiuso' && g.stato !== 'Sospeso'))
           .map((g) => (
-          <Card key={g.stato} shadow="sm" className="px-3 py-1.5">
-            <div className="text-center">
-              <p className="text-lg sm:text-xl font-bold" style={{ color: `var(--heroui-${statoRegColor[g.stato] || 'default'})` }}>
-                {g.items.length}
-              </p>
-              <p className="text-tiny text-default-400">{g.stato}</p>
-            </div>
-          </Card>
+          <motion.div key={g.stato} variants={fadeInUp}>
+            <Card shadow="sm" className="px-3 py-1.5">
+              <div className="text-center">
+                <p className="text-lg sm:text-xl font-bold" style={{ color: `var(--heroui-${statoRegColor[g.stato] || 'default'})` }}>
+                  {g.items.length}
+                </p>
+                <p className="text-tiny text-default-400">{g.stato}</p>
+              </div>
+            </Card>
+          </motion.div>
         ))}
-      </div>
+      </motion.div>
 
       {/* Global view */}
       {viewMode === 'global' && (
@@ -485,13 +530,21 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
           ) : (
             <>
               {/* Mobile cards */}
-              <div className="flex flex-col gap-2 sm:hidden">
-                {globalFiltered.map((a) => (
-                  <Card key={a.id} shadow="sm" className="bg-white">
+              <motion.div
+                className="flex flex-col gap-2 sm:hidden"
+                variants={staggerContainer}
+                initial="hidden"
+                animate="visible"
+              >
+                {globalFiltered.map((a) => {
+                  const isRunning = runningTimerIds.has(a.id);
+                  return (
+                  <motion.div key={a.id} variants={fadeInUp}>
+                    <Card shadow="sm" className={isRunning ? 'bg-[#fff8e8] border border-warning/30' : 'bg-white'}>
                     <CardBody className="p-3">
                       <div className="flex justify-between items-start">
                         <div>
-                          <span className="font-mono text-xs text-white bg-[#34A0A4] px-2 py-0.5 rounded">
+                          <span className="font-mono text-xs text-white bg-centoraggi-teal px-2 py-0.5 rounded">
                             {a.nr}
                           </span>
                           <span className="text-sm font-medium ml-2">{a.rifAssistenzaNome || '—'}</span>
@@ -544,8 +597,10 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                       </div>
                     </CardBody>
                   </Card>
-                ))}
-              </div>
+                  </motion.div>
+                  );
+                })}
+              </motion.div>
 
               {/* Desktop table */}
               <Card shadow="sm" className="bg-white hidden sm:block overflow-hidden">
@@ -574,7 +629,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                   </TableHeader>
                   <TableBody>
                     {globalFiltered.map((a) => (
-                      <TableRow key={a.id} className="hover:bg-default-50 transition-colors">
+                      <TableRow key={a.id} className={`transition-colors ${runningTimerIds.has(a.id) ? '!bg-[#fff8e8] hover:!bg-[#fdedc7]' : 'hover:bg-default-50'}`}>
                         <TableCell>
                           <Button size="sm" color="primary" variant="flat" onPress={() => onOpen(a)}>
                             Apri
@@ -584,7 +639,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                           <span className="text-sm text-default-600">{formatDate(a.data)}</span>
                         </TableCell>
                         <TableCell>
-                          <span className="font-mono text-xs text-white bg-[#34A0A4] px-2 py-0.5 rounded">
+                          <span className="font-mono text-xs text-white bg-centoraggi-teal px-2 py-0.5 rounded">
                             {a.nr}
                           </span>
                         </TableCell>
@@ -646,7 +701,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
         grouped.map((group) => {
           const isExpanded = expandedGroups.has(group.stato);
           const color = statoRegColor[group.stato] || 'default';
-          const icon = statoRegIcon[group.stato] || '📄';
+          const Icon = statoRegIcon[group.stato] || FileText;
 
           return (
             <Card key={group.stato} shadow="sm" className="bg-white overflow-hidden">
@@ -657,7 +712,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                 className="w-full flex items-center justify-between px-4 py-3 sm:px-5 sm:py-4 hover:bg-default-50 transition-colors cursor-pointer text-left"
               >
                 <div className="flex items-center gap-3">
-                  <span className="text-lg">{icon}</span>
+                  <Icon className="w-5 h-5 text-default-500" />
                   <div>
                     <span className="font-semibold text-foreground text-sm sm:text-base">{group.stato}</span>
                     <Chip size="sm" variant="flat" color={color} className="ml-2">
@@ -665,19 +720,22 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                     </Chip>
                   </div>
                 </div>
-                <svg
+                <ChevronDown
                   className={`w-5 h-5 text-default-400 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
+                />
               </button>
 
               {/* Expanded content */}
-              {isExpanded && (
-                <>
+              <AnimatePresence initial={false}>
+                {isExpanded && (
+                  <motion.div
+                    key="content"
+                    variants={collapsibleSection}
+                    initial="hidden"
+                    animate="visible"
+                    exit="hidden"
+                    className="overflow-hidden"
+                  >
                   {group.items.length === 0 ? (
                     <div className="px-4 py-8 text-center text-default-400 text-sm">
                       Non ci sono assistenze in questo stato
@@ -687,10 +745,10 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                   {/* Mobile cards */}
                   <div className="flex flex-col gap-2 p-3 sm:hidden">
                     {group.items.map((a) => (
-                      <div key={a.id} className="border border-default-200 rounded-lg p-3">
+                      <div key={a.id} className={`rounded-lg p-3 border ${runningTimerIds.has(a.id) ? 'bg-[#fff8e8] border-warning/30' : 'border-default-200'}`}>
                         <div className="flex justify-between items-start">
                           <div>
-                            <span className="font-mono text-xs text-white bg-[#34A0A4] px-2 py-0.5 rounded">
+                            <span className="font-mono text-xs text-white bg-centoraggi-teal px-2 py-0.5 rounded">
                               {a.nr}
                             </span>
                             <span className="text-sm font-medium ml-2">{a.rifAssistenzaNome || '—'}</span>
@@ -771,7 +829,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                       </TableHeader>
                       <TableBody>
                         {group.items.map((a) => (
-                          <TableRow key={a.id} className="hover:bg-default-50 transition-colors">
+                          <TableRow key={a.id} className={`transition-colors ${runningTimerIds.has(a.id) ? '!bg-[#fff8e8] hover:!bg-[#fdedc7]' : 'hover:bg-default-50'}`}>
                             <TableCell>
                               <Button size="sm" color="primary" variant="flat" onPress={() => onOpen(a)}>
                                 Apri
@@ -781,7 +839,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                               <span className="text-sm text-default-600">{formatDate(a.data)}</span>
                             </TableCell>
                             <TableCell>
-                              <span className="font-mono text-xs text-white bg-[#34A0A4] px-2 py-0.5 rounded">
+                              <span className="font-mono text-xs text-white bg-centoraggi-teal px-2 py-0.5 rounded">
                                 {a.nr}
                               </span>
                             </TableCell>
@@ -820,8 +878,9 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                   </div>
                   </>
                   )}
-                </>
-              )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </Card>
           );
         })
@@ -843,7 +902,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
           manutenzioniGrouped.map((group) => {
             const isExpanded = expandedGroups.has(group.stato);
             const color = statoRegColor[group.stato] || 'default';
-            const icon = statoRegIcon[group.stato] || '📄';
+            const Icon = statoRegIcon[group.stato] || FileText;
 
             return (
               <Card key={group.stato} shadow="sm" className="bg-white overflow-hidden">
@@ -853,7 +912,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                   className="w-full flex items-center justify-between px-4 py-3 sm:px-5 sm:py-4 hover:bg-default-50 transition-colors cursor-pointer text-left"
                 >
                   <div className="flex items-center gap-3">
-                    <span className="text-lg">{icon}</span>
+                    <Icon className="w-5 h-5 text-default-500" />
                     <div>
                       <span className="font-semibold text-foreground text-sm sm:text-base">{group.stato}</span>
                       <Chip size="sm" variant="flat" color={color} className="ml-2">
@@ -861,18 +920,21 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                       </Chip>
                     </div>
                   </div>
-                  <svg
+                  <ChevronDown
                     className={`w-5 h-5 text-default-400 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
+                  />
                 </button>
 
+                <AnimatePresence initial={false}>
                 {isExpanded && (
-                  <>
+                  <motion.div
+                    key="content"
+                    variants={collapsibleSection}
+                    initial="hidden"
+                    animate="visible"
+                    exit="hidden"
+                    className="overflow-hidden"
+                  >
                     {group.items.length === 0 ? (
                       <div className="px-4 py-8 text-center text-default-400 text-sm">
                         Non ci sono assistenze in questo stato
@@ -882,10 +944,10 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                     {/* Mobile cards */}
                     <div className="flex flex-col gap-2 p-3 sm:hidden">
                       {group.items.map((a) => (
-                        <div key={a.id} className="border border-default-200 rounded-lg p-3">
+                        <div key={a.id} className={`rounded-lg p-3 border ${runningTimerIds.has(a.id) ? 'bg-[#fff8e8] border-warning/30' : 'border-default-200'}`}>
                           <div className="flex justify-between items-start">
                             <div>
-                              <span className="font-mono text-xs text-white bg-[#34A0A4] px-2 py-0.5 rounded">
+                              <span className="font-mono text-xs text-white bg-centoraggi-teal px-2 py-0.5 rounded">
                                 {a.nr}
                               </span>
                               <span className="text-sm font-medium ml-2">{a.rifAssistenzaNome || '—'}</span>
@@ -962,7 +1024,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                         </TableHeader>
                         <TableBody>
                           {group.items.map((a) => (
-                            <TableRow key={a.id} className="hover:bg-default-50 transition-colors">
+                            <TableRow key={a.id} className={`transition-colors ${runningTimerIds.has(a.id) ? '!bg-[#fff8e8] hover:!bg-[#fdedc7]' : 'hover:bg-default-50'}`}>
                               <TableCell>
                                 <Button size="sm" color="primary" variant="flat" onPress={() => onOpen(a)}>
                                   Apri
@@ -972,7 +1034,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                                 <span className="text-sm text-default-600">{formatDate(a.data)}</span>
                               </TableCell>
                               <TableCell>
-                                <span className="font-mono text-xs text-white bg-[#34A0A4] px-2 py-0.5 rounded">
+                                <span className="font-mono text-xs text-white bg-centoraggi-teal px-2 py-0.5 rounded">
                                   {a.nr}
                                 </span>
                               </TableCell>
@@ -1011,8 +1073,9 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                     </div>
                     </>
                     )}
-                  </>
+                  </motion.div>
                 )}
+                </AnimatePresence>
               </Card>
             );
           })
@@ -1062,6 +1125,6 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
           <Spinner size="sm" color="primary" />
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }

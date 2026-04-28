@@ -96,9 +96,9 @@ export default function FormSection({
   return (
     <>
       {!isCreate && a && (
-        <Card shadow="sm" className="bg-[#e8f4f8] border border-[#168AAD]/20">
+        <Card shadow="sm" className="bg-centoraggi-surface border border-centoraggi-accent/20">
           <CardBody className="gap-2 p-4">
-            <p className="text-xs font-semibold text-[#1A759F] uppercase tracking-wider">Informazioni</p>
+            <p className="text-xs font-semibold text-centoraggi-primary uppercase tracking-wider">Informazioni</p>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
               <div>
                 <span className="text-default-400 text-xs">NR</span>
@@ -117,9 +117,9 @@ export default function FormSection({
         </Card>
       )}
 
-      <Card shadow="sm" className="bg-[#e8f4f8] border border-[#168AAD]/20 overflow-hidden">
+      <Card shadow="sm" className="bg-centoraggi-surface border border-centoraggi-accent/20 overflow-hidden">
         <CardBody className="gap-2.5 p-3">
-          <p className="text-xs font-semibold text-[#1A759F] uppercase tracking-wider">Assegnazione</p>
+          <p className="text-xs font-semibold text-centoraggi-primary uppercase tracking-wider">Assegnazione</p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <Select
@@ -181,7 +181,7 @@ export default function FormSection({
       <Card shadow="sm" className="bg-white">
         <CardBody className="gap-2.5 p-3">
           <div className="flex items-center justify-between gap-2 flex-wrap">
-            <p className="text-xs font-semibold text-[#184E77] uppercase tracking-wider">Dettagli registrazione</p>
+            <p className="text-xs font-semibold text-centoraggi-deep uppercase tracking-wider">Dettagli registrazione</p>
             {!isCreate && a && (
               <div className="flex items-center gap-2 flex-wrap">
                 <Chip size="sm" variant="flat" color="primary">{a.statoReg}</Chip>
@@ -280,10 +280,10 @@ export default function FormSection({
           />
 
           <div className="flex justify-end gap-2 pt-1">
-            <Button variant="flat" className="text-[#184E77]" onPress={onBack}>
+            <Button variant="flat" className="text-centoraggi-deep" onPress={onBack}>
               Annulla
             </Button>
-            <Button color="primary" onPress={onSave} isLoading={isPending} className="font-semibold bg-[#1A759F]">
+            <Button color="primary" onPress={onSave} isLoading={isPending} className="font-semibold bg-centoraggi-primary">
               {isCreate ? 'Crea' : 'Salva'}
             </Button>
           </div>

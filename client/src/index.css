@@ -1,9 +1,10 @@
 @import "tailwindcss";
 @config "../tailwind.config.js";
 
-/* Global blue borders */
+/* Global blue borders — token: --centoraggi-accent === centoraggi.600 (#168AAD) */
 :root {
-  --border-blue: #168AAD;
+  --centoraggi-accent: #168AAD;
+  --border-blue: var(--centoraggi-accent);
 }
 
 /* HeroUI bordered inputs, selects, textareas */
@@ -11,25 +12,25 @@
 [data-slot="trigger"].border-default-200,
 [data-slot="input-wrapper"][class*="border-"],
 [data-slot="trigger"][class*="border-"] {
-  border-color: #168AAD40 !important;
+  border-color: color-mix(in srgb, var(--centoraggi-accent) 25%, transparent) !important;
 }
 [data-slot="input-wrapper"]:hover,
 [data-slot="trigger"]:hover {
-  border-color: #168AAD80 !important;
+  border-color: color-mix(in srgb, var(--centoraggi-accent) 50%, transparent) !important;
 }
 [data-slot="input-wrapper"]:focus-within,
 [data-slot="trigger"][aria-expanded="true"] {
-  border-color: #168AAD !important;
+  border-color: var(--centoraggi-accent) !important;
 }
 
 /* HeroUI Card borders */
 .heroui-card,
 [data-slot="base"] {
-  border-color: #168AAD30;
+  border-color: color-mix(in srgb, var(--centoraggi-accent) 19%, transparent);
 }
 
 /* Navbar border */
 nav[data-slot="base"] {
-  border-color: #168AAD40 !important;
+  border-color: color-mix(in srgb, var(--centoraggi-accent) 25%, transparent) !important;
 }
 

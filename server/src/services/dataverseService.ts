@@ -203,10 +203,8 @@ export class DataverseService {
     'phyo_costoorario',
     'phyo_totale',
     'phyo_materialeutilizzato',
-    'phyo_tipologia_assistenza',
     '_phyo_rifassistenza_value',
     '_phyo_risorsa_value',
-    '_phyo_cliente_value',
     'statecode'
   ];
 

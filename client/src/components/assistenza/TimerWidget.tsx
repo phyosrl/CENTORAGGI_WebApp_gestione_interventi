@@ -1,4 +1,5 @@
 import { Button } from '@heroui/react';
+import { Play, Pause, Check, RotateCcw } from 'lucide-react';
 
 interface TimerWidgetProps {
   timerDisplay: string;
@@ -30,20 +31,20 @@ export default function TimerWidget({
       </div>
       {!timerRunning ? (
         <Button size="sm" isIconOnly color="success" variant="flat" onPress={onStart} aria-label="Avvia timer">
-          ▶
+          <Play className="w-4 h-4" />
         </Button>
       ) : (
         <Button size="sm" isIconOnly color="danger" variant="flat" onPress={onPause} aria-label="Pausa timer">
-          ⏸
+          <Pause className="w-4 h-4" />
         </Button>
       )}
       {timerSeconds > 0 && (
         <>
           <Button size="sm" isIconOnly color="primary" variant="flat" onPress={onApply} aria-label="Applica ore">
-            ✓
+            <Check className="w-4 h-4" />
           </Button>
           <Button size="sm" isIconOnly variant="flat" onPress={onReset} aria-label="Reset timer">
-            ↺
+            <RotateCcw className="w-4 h-4" />
           </Button>
         </>
       )}

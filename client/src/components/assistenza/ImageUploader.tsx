@@ -1,4 +1,5 @@
 import { Button, Card, CardBody } from '@heroui/react';
+import { X } from 'lucide-react';
 import { Annotation } from '../../services/api';
 
 interface LocalPreview {
@@ -77,7 +78,7 @@ export default function ImageUploader({
               <span>{uploadProgress}%</span>
             </div>
             <div className="h-2 rounded-full bg-default-100 overflow-hidden">
-              <div className="h-full bg-[#1A759F] transition-all" style={{ width: `${uploadProgress}%` }} />
+              <div className="h-full bg-centoraggi-primary transition-all" style={{ width: `${uploadProgress}%` }} />
             </div>
           </div>
         )}
@@ -89,14 +90,15 @@ export default function ImageUploader({
             </p>
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
               {localPreviews.map((p, i) => (
-                <div key={`${p.file.name}-${i}`} className="relative group aspect-square rounded-lg overflow-hidden border border-[#168AAD]/20">
+                <div key={`${p.file.name}-${i}`} className="relative group aspect-square rounded-lg overflow-hidden border border-centoraggi-accent/20">
                   <img src={p.preview} alt={p.file.name} className="w-full h-full object-cover" />
                   <button
                     type="button"
                     onClick={() => onRemoveLocalPreview(i)}
-                    className="absolute top-1 right-1 w-6 h-6 rounded-full bg-red-500 text-white text-xs flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                    className="absolute top-1 right-1 w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                    aria-label="Rimuovi immagine"
                   >
-                    ✕
+                    <X className="w-3.5 h-3.5" />
                   </button>
                 </div>
               ))}
@@ -109,7 +111,7 @@ export default function ImageUploader({
             <p className="text-xs text-default-400 mb-2">Caricate ({images.length})</p>
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
               {images.map((img) => (
-                <div key={img.annotationid} className="relative group aspect-square rounded-lg overflow-hidden border border-[#168AAD]/20">
+                <div key={img.annotationid} className="relative group aspect-square rounded-lg overflow-hidden border border-centoraggi-accent/20">
                   <img
                     src={`data:${img.mimetype};base64,${img.documentbody}`}
                     alt={img.filename}
@@ -125,9 +127,10 @@ export default function ImageUploader({
                   <button
                     type="button"
                     onClick={() => onDeleteImage(img.annotationid)}
-                    className="absolute top-1 right-1 w-6 h-6 rounded-full bg-red-500 text-white text-xs flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                    className="absolute top-1 right-1 w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                    aria-label="Elimina immagine"
                   >
-                    ✕
+                    <X className="w-3.5 h-3.5" />
                   </button>
                   <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-[10px] px-1 py-0.5 truncate">
                     {img.filename}

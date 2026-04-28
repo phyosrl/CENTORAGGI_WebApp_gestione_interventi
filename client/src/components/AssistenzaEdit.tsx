@@ -1,6 +1,23 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  ArrowLeft,
+  ArrowUp,
+  MapPin,
+  ExternalLink,
+  Image as ImageIcon,
+  Camera,
+  Upload,
+  X,
+  Play,
+  Pause,
+  Square,
+  Check,
+  RotateCcw,
+  Trash2,
+  Save,
+} from 'lucide-react';
+import {
   Card,
   CardBody,
   Input,
@@ -62,6 +79,11 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSavedPayloadRef = useRef<string>('');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>(isCreate ? 'idle' : 'saved');
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(isCreate ? null : new Date());
+  const [saveClockTick, setSaveClockTick] = useState(0);
 
   // Timer state
   const [timerStatus, setTimerStatus] = useState<'idle' | 'running' | 'paused' | 'stopped'>(existingTimer?.status ?? 'idle');
@@ -303,6 +325,25 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
     return Array.from(set).sort();
   }, [rifAssistenzeList, clienteId, rifAssistenzaId, tipologia]);
 
+  useEffect(() => {
+    if (!lastSavedAt) return;
+    const id = setInterval(() => setSaveClockTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [lastSavedAt]);
+
+  const formatSavedAgo = useMemo(() => {
+    if (!lastSavedAt) return '';
+    // Force recompute every second using saveClockTick.
+    void saveClockTick;
+    const diffSec = Math.max(0, Math.floor((Date.now() - lastSavedAt.getTime()) / 1000));
+    if (diffSec < 2) return 'ora';
+    if (diffSec < 60) return `${diffSec}s fa`;
+    const mins = Math.floor(diffSec / 60);
+    if (mins < 60) return `${mins} min fa`;
+    const hours = Math.floor(mins / 60);
+    return `${hours} h fa`;
+  }, [lastSavedAt, saveClockTick]);
+
   // Clienti filtered by selected tipologia / rif
   const filteredAccounts = useMemo(() => {
     if (!accountsList) return [];
@@ -336,52 +377,17 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
   const updateMutation = useMutation({
     mutationFn: (payload: UpdateAssistenzaPayload) =>
       updateAssistenza(assistenza!.id, payload),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['assistenzeRegistrazioni'] });
-      addToast({
-        title: 'Salvato',
-        description: 'Registrazione aggiornata con successo',
-        color: 'success',
-      });
-      onBack();
-    },
-    onError: (err: any) => {
-      addToast({
-        title: 'Errore',
-        description: err?.response?.data?.error || 'Salvataggio fallito',
-        color: 'danger',
-      });
-    },
   });
 
   const createMutation = useMutation({
     mutationFn: (payload: CreateAssistenzaPayload) =>
       createAssistenza(payload),
-    onSuccess: async (result) => {
-      if (localPreviews.length > 0 && result?.id) {
-        await uploadAllImages(result.id);
-      }
-      queryClient.invalidateQueries({ queryKey: ['assistenzeRegistrazioni'] });
-      addToast({
-        title: 'Creata',
-        description: 'Nuova registrazione creata con successo',
-        color: 'success',
-      });
-      onBack();
-    },
-    onError: (err: any) => {
-      addToast({
-        title: 'Errore',
-        description: err?.response?.data?.error || 'Creazione fallita',
-        color: 'danger',
-      });
-    },
   });
 
   const isPending = updateMutation.isPending || createMutation.isPending;
 
-  const handleSave = () => {
-    const basePayload = {
+  const buildBasePayload = useCallback(() => {
+    return {
       phyo_attne: attne || null,
       phyo_oreintervento: oreIntervento ? (() => {
         const parts = oreIntervento.split(':').map(Number);
@@ -394,34 +400,119 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
       _phyo_cliente_value: clienteId || null,
       _phyo_rifassistenza_value: rifAssistenzaId || null,
     };
+  }, [attne, oreIntervento, ore, descrizione, materiale, totale, clienteId, rifAssistenzaId]);
+
+  const buildUpdatePayload = useCallback((): UpdateAssistenzaPayload => ({
+    ...buildBasePayload(),
+    phyo_data: data || null,
+  }), [buildBasePayload, data]);
+
+  const updatePayloadSignature = useMemo(() => JSON.stringify(buildUpdatePayload()), [buildUpdatePayload]);
+
+  useEffect(() => {
+    if (isCreate) return;
+    if (!lastSavedPayloadRef.current) {
+      lastSavedPayloadRef.current = updatePayloadSignature;
+    }
+  }, [isCreate, updatePayloadSignature]);
+
+  useEffect(() => {
+    if (isCreate) return;
+    if (!lastSavedPayloadRef.current) return;
+    if (updatePayloadSignature === lastSavedPayloadRef.current) return;
+
+    if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current);
+    autoSaveTimeoutRef.current = setTimeout(async () => {
+      if (updateMutation.isPending) return;
+      setSaveStatus('saving');
+      try {
+        const payload = buildUpdatePayload();
+        await updateMutation.mutateAsync(payload);
+        lastSavedPayloadRef.current = JSON.stringify(payload);
+        setLastSavedAt(new Date());
+        setSaveStatus('saved');
+        queryClient.invalidateQueries({ queryKey: ['assistenzeRegistrazioni'] });
+      } catch {
+        setSaveStatus('error');
+      }
+    }, 1500);
+
+    return () => {
+      if (autoSaveTimeoutRef.current) {
+        clearTimeout(autoSaveTimeoutRef.current);
+        autoSaveTimeoutRef.current = null;
+      }
+    };
+  }, [isCreate, updatePayloadSignature, buildUpdatePayload, updateMutation, queryClient]);
+
+  const handleSave = async (opts?: { closeAfterSave?: boolean; manual?: boolean }) => {
+    const closeAfterSave = opts?.closeAfterSave ?? false;
+    const manual = opts?.manual ?? false;
 
     if (isCreate) {
-      createMutation.mutate({
-        ...basePayload,
-        phyo_data: data || null,
-        _phyo_risorsa_value: props.risorsaId!,
-      });
+      try {
+        const result = await createMutation.mutateAsync({
+          ...buildBasePayload(),
+          phyo_data: data || null,
+          _phyo_risorsa_value: props.risorsaId!,
+        });
+        if (localPreviews.length > 0 && result?.id) {
+          await uploadAllImages(result.id);
+        }
+        queryClient.invalidateQueries({ queryKey: ['assistenzeRegistrazioni'] });
+        addToast({
+          title: 'Creata',
+          description: 'Nuova registrazione creata con successo',
+          color: 'success',
+        });
+        onBack();
+      } catch (err: any) {
+        addToast({
+          title: 'Errore',
+          description: err?.response?.data?.error || 'Creazione fallita',
+          color: 'danger',
+        });
+      }
     } else {
-      updateMutation.mutate({
-        ...basePayload,
-        phyo_data: data || null,
-      });
+      try {
+        const payload = buildUpdatePayload();
+        setSaveStatus('saving');
+        await updateMutation.mutateAsync(payload);
+        lastSavedPayloadRef.current = JSON.stringify(payload);
+        setLastSavedAt(new Date());
+        setSaveStatus('saved');
+        queryClient.invalidateQueries({ queryKey: ['assistenzeRegistrazioni'] });
+
+        if (manual) {
+          addToast({
+            title: 'Salvato',
+            description: 'Registrazione aggiornata con successo',
+            color: 'success',
+          });
+        }
+        if (closeAfterSave) {
+          onBack();
+        }
+      } catch (err: any) {
+        setSaveStatus('error');
+        addToast({
+          title: 'Errore',
+          description: err?.response?.data?.error || 'Salvataggio fallito',
+          color: 'danger',
+        });
+      }
     }
   };
 
   return (
-    <div className="flex flex-col gap-3 sm:gap-4">
+    <div className="flex flex-col gap-3 sm:gap-4 relative">
       {/* Header */}
       <div className="flex items-center gap-3">
         <Button
           size="sm"
           variant="flat"
           onPress={onBack}
-          startContent={
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-          }
+          startContent={<ArrowLeft className="w-4 h-4" />}
         >
           Indietro
         </Button>
@@ -443,13 +534,56 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
             </>
           )}
         </div>
+        <Button
+          size="sm"
+          variant="flat"
+          onPress={onBack}
+          className="text-centoraggi-deep"
+        >
+          Annulla
+        </Button>
+        {isCreate ? (
+          <Button
+            size="sm"
+            color="primary"
+            onPress={() => handleSave({ closeAfterSave: true, manual: true })}
+            isLoading={isPending}
+            className="font-semibold bg-centoraggi-primary"
+            startContent={!isPending ? <Save className="w-4 h-4" /> : undefined}
+          >
+            Crea
+          </Button>
+        ) : (
+          <>
+            <div className="hidden sm:flex items-center rounded-lg border border-default-200 bg-white/80 px-2.5 py-1.5 text-xs text-default-500">
+              {saveStatus === 'saving' ? 'Salvataggio...' : saveStatus === 'error' ? 'Errore salvataggio' : `Salvato ${formatSavedAgo}`}
+            </div>
+            <Button
+              size="sm"
+              color="primary"
+              variant="flat"
+              onPress={() => handleSave({ manual: true })}
+              isLoading={isPending}
+              className="font-semibold"
+              startContent={!isPending ? <Save className="w-4 h-4" /> : undefined}
+            >
+              Salva ora
+            </Button>
+          </>
+        )}
       </div>
+
+      {!isCreate && (
+        <p className="sm:hidden -mt-1 text-xs text-default-500">
+          {saveStatus === 'saving' ? 'Salvataggio...' : saveStatus === 'error' ? 'Errore salvataggio' : `Salvato ${formatSavedAgo}`}
+        </p>
+      )}
 
       {/* Info (read-only) — only for edit mode */}
       {!isCreate && (
-        <Card shadow="sm" className="bg-[#e8f4f8] border border-[#168AAD]/20">
+        <Card shadow="sm" className="bg-centoraggi-surface border border-centoraggi-accent/20">
           <CardBody className="gap-2 p-4">
-            <p className="text-xs font-semibold text-[#1A759F] uppercase tracking-wider">Informazioni</p>
+            <p className="text-xs font-semibold text-centoraggi-primary uppercase tracking-wider">Informazioni</p>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
               <div>
                 <span className="text-default-400 text-xs">NR</span>
@@ -470,9 +604,9 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
 
       {/* Editable form */}
       {/* Cliente & Rif. Assistenza */}
-      <Card shadow="sm" className="bg-[#e8f4f8] border border-[#168AAD]/20 overflow-hidden">
+      <Card shadow="sm" className="bg-centoraggi-surface border border-centoraggi-accent/20 overflow-hidden">
         <CardBody className="gap-2.5 p-3">
-          <p className="text-xs font-semibold text-[#1A759F] uppercase tracking-wider">Assegnazione</p>
+          <p className="text-xs font-semibold text-centoraggi-primary uppercase tracking-wider">Assegnazione</p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <Select
@@ -577,7 +711,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
       {/* Dettagli registrazione */}
       <Card shadow="sm" className="bg-white">
         <CardBody className="gap-2.5 p-3">
-          <p className="text-xs font-semibold text-[#184E77] uppercase tracking-wider">Dettagli registrazione</p>
+          <p className="text-xs font-semibold text-centoraggi-deep uppercase tracking-wider">Dettagli registrazione</p>
 
           <div className="grid grid-cols-1 lg:grid-cols-[0.8fr_1.2fr] gap-3 items-start">
             <div className="space-y-2.5">
@@ -607,19 +741,30 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
               />
             </div>
 
-            <div className="rounded-2xl border border-[#168AAD]/20 bg-[#e8f4f8] p-2.5">
+            <div className="hidden md:block rounded-2xl border border-centoraggi-accent/20 bg-centoraggi-surface p-2.5">
               <div className="grid grid-cols-1 gap-2">
-                <Input
-                  label="Ore Intervento"
-                  placeholder="00:00:00"
-                  value={oreIntervento}
-                  onValueChange={setOreIntervento}
-                  variant="bordered"
-                  type="time"
-                  classNames={{ inputWrapper: 'bg-white' }}
-                  size="sm"
-                  step={1}
-                />
+                <div className="flex items-center gap-2">
+                  <Input
+                    label="Ore Intervento"
+                    placeholder="00:00:00"
+                    value={oreIntervento}
+                    onValueChange={setOreIntervento}
+                    variant="bordered"
+                    type="time"
+                    classNames={{ inputWrapper: 'bg-white' }}
+                    size="sm"
+                    step={1}
+                    className="flex-1"
+                  />
+                  <Button
+                    size="sm"
+                    variant="flat"
+                    onPress={() => setOreIntervento('')}
+                    className="self-center"
+                  >
+                    Azzera
+                  </Button>
+                </div>
 
                 <div className="flex items-center justify-between gap-2 rounded-xl border border-default-200 bg-white px-3 py-2">
                   <div>
@@ -644,30 +789,31 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
                 </div>
 
                 <div className="flex items-center gap-1 w-full overflow-hidden">
-                  <Button size="sm" color="success" variant="flat" onPress={handleStartTimer} aria-label="Avvia timer" className="justify-center flex-1 basis-0 min-w-0 h-9 whitespace-nowrap text-[10px] sm:text-xs font-medium px-1 sm:px-1.5">
-                    ▶ Avvia
+                  <Button size="sm" color="success" variant="flat" onPress={handleStartTimer} aria-label="Avvia timer" className="justify-center flex-1 basis-0 min-w-0 h-9 whitespace-nowrap text-[10px] sm:text-xs font-medium px-1 sm:px-1.5" startContent={<Play className="w-3.5 h-3.5" />}>
+                    Avvia
                   </Button>
                   <Button
                     size="sm"
                     variant="flat"
                     onPress={handlePauseTimer}
                     aria-label="Pausa timer"
-                    className="justify-center flex-1 basis-0 min-w-0 h-9 whitespace-nowrap text-[10px] sm:text-xs font-medium px-1 sm:px-1.5 bg-orange-100 text-orange-700 border border-orange-200 transition-all duration-150 focus:scale-105 active:scale-95 hover:animate-pulse focus:ring-2 focus:ring-orange-300"
+                    className="justify-center flex-1 basis-0 min-w-0 h-9 whitespace-nowrap text-[10px] sm:text-xs font-medium px-1 sm:px-1.5 bg-orange-100 text-orange-700 border border-orange-200 transition-all duration-150 focus:scale-105 active:scale-95 focus:ring-2 focus:ring-orange-300"
                     isDisabled={!timerRunning}
+                    startContent={<Pause className="w-3.5 h-3.5" />}
                   >
-                    ⏸ Pausa
+                    Pausa
                   </Button>
-                  <Button size="sm" color="danger" variant="flat" onPress={handleStopTimer} aria-label="Ferma timer" className="justify-center flex-1 basis-0 min-w-0 h-9 whitespace-nowrap text-[10px] sm:text-xs font-medium px-1 sm:px-1.5 transition-all duration-150 focus:scale-105 active:scale-95 hover:animate-pulse focus:ring-2 focus:ring-rose-300" isDisabled={timerSeconds === 0}>
-                    ■ Stop
+                  <Button size="sm" color="danger" variant="flat" onPress={handleStopTimer} aria-label="Ferma timer" className="justify-center flex-1 basis-0 min-w-0 h-9 whitespace-nowrap text-[10px] sm:text-xs font-medium px-1 sm:px-1.5 transition-all duration-150 focus:scale-105 active:scale-95 focus:ring-2 focus:ring-rose-300" isDisabled={timerSeconds === 0} startContent={<Square className="w-3.5 h-3.5" />}>
+                    Stop
                   </Button>
-                  <Button size="sm" color="primary" variant="flat" onPress={applyTimerToOre} aria-label="Conferma e compila ore intervento" className="justify-center flex-1 basis-0 min-w-0 h-9 whitespace-nowrap text-[10px] sm:text-xs font-medium px-1 sm:px-1.5 transition-all duration-150 focus:scale-105 active:scale-95 hover:animate-pulse focus:ring-2 focus:ring-sky-300" isDisabled={timerSeconds === 0}>
-                    ✓ Conferma
+                  <Button size="sm" color="primary" variant="flat" onPress={applyTimerToOre} aria-label="Conferma e compila ore intervento" className="justify-center flex-1 basis-0 min-w-0 h-9 whitespace-nowrap text-[10px] sm:text-xs font-medium px-1 sm:px-1.5 transition-all duration-150 focus:scale-105 active:scale-95 focus:ring-2 focus:ring-sky-300" isDisabled={timerSeconds === 0} startContent={<Check className="w-3.5 h-3.5" />}>
+                    Conferma
                   </Button>
-                  <Button size="sm" color="secondary" variant="flat" onPress={handleRestartTimer} aria-label="Riavvia timer" className="justify-center flex-1 basis-0 min-w-0 h-9 whitespace-nowrap text-[10px] sm:text-xs font-medium px-1 sm:px-1.5 transition-all duration-150 focus:scale-105 active:scale-95 hover:animate-pulse focus:ring-2 focus:ring-cyan-300" isDisabled={timerSeconds === 0}>
-                    ↻ Riavvia
+                  <Button size="sm" color="secondary" variant="flat" onPress={handleRestartTimer} aria-label="Riavvia timer" className="justify-center flex-1 basis-0 min-w-0 h-9 whitespace-nowrap text-[10px] sm:text-xs font-medium px-1 sm:px-1.5 transition-all duration-150 focus:scale-105 active:scale-95 focus:ring-2 focus:ring-cyan-300" isDisabled={timerSeconds === 0} startContent={<RotateCcw className="w-3.5 h-3.5" />}>
+                    Riavvia
                   </Button>
-                  <Button size="sm" variant="flat" onPress={handleClearTimer} aria-label="Elimina timer" className="justify-center flex-1 basis-0 min-w-0 h-9 whitespace-nowrap text-[10px] sm:text-xs font-medium px-1 sm:px-1.5 transition-all duration-150 focus:scale-105 active:scale-95 hover:animate-pulse focus:ring-2 focus:ring-gray-300" isDisabled={timerSeconds === 0}>
-                    🗑 Elimina
+                  <Button size="sm" variant="flat" onPress={handleClearTimer} aria-label="Elimina timer" className="justify-center flex-1 basis-0 min-w-0 h-9 whitespace-nowrap text-[10px] sm:text-xs font-medium px-1 sm:px-1.5 transition-all duration-150 focus:scale-105 active:scale-95 focus:ring-2 focus:ring-gray-300" isDisabled={timerSeconds === 0} startContent={<Trash2 className="w-3.5 h-3.5" />}>
+                    Elimina
                   </Button>
                 </div>
               </div>
@@ -699,27 +845,130 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
             variant="bordered"
             minRows={2}
           />
-
-          <div className="flex justify-end gap-2 pt-1">
-            <Button variant="flat" className="text-[#184E77]" onPress={onBack}>
-              Annulla
-            </Button>
-            <Button
-              color="primary"
-              onPress={handleSave}
-              isLoading={isPending}
-              className="font-semibold bg-[#1A759F]"
-            >
-              {isCreate ? 'Crea' : 'Salva'}
-            </Button>
-          </div>
         </CardBody>
       </Card>
+
+      {/* Foto / Allegati */}
+        <Card shadow="sm" className="bg-white">
+          <CardBody className="gap-2.5 p-3">
+
+            {/* Upload buttons */}
+            <div className="flex gap-2 flex-wrap">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={(e) => { handleFileSelect(e.target.files); e.target.value = ''; }}
+              />
+              <Button
+                color="primary"
+                variant="flat"
+                onPress={() => fileInputRef.current?.click()}
+                startContent={<ImageIcon className="w-5 h-5" />}
+              >
+                Scegli immagini
+              </Button>
+              <input
+                ref={(el) => { if (el) el.setAttribute('capture', 'environment'); }}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                id="cameraInput"
+                className="hidden"
+                onChange={(e) => { handleFileSelect(e.target.files); e.target.value = ''; }}
+              />
+              <Button
+                color="secondary"
+                variant="flat"
+                onPress={() => document.getElementById('cameraInput')?.click()}
+                startContent={<Camera className="w-5 h-5" />}
+              >
+                Scatta foto
+              </Button>
+              {localPreviews.length > 0 && !isCreate && (
+                <Button
+                  color="primary"
+                  isLoading={uploading}
+                  onPress={() => uploadAllImages()}
+                  startContent={!uploading ? <Upload className="w-5 h-5" /> : undefined}
+                >
+                  Carica {localPreviews.length} immagin{localPreviews.length === 1 ? 'e' : 'i'}
+                </Button>
+              )}
+            </div>
+
+            {/* Local previews (not yet uploaded) */}
+            {localPreviews.length > 0 && (
+              <div>
+                <p className="text-xs text-default-400 mb-2">
+                  Da caricare{isCreate ? ' (verranno caricate al salvataggio)' : ''}
+                </p>
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
+                  {localPreviews.map((p, i) => (
+                    <div key={i} className="relative group aspect-square rounded-lg overflow-hidden border border-centoraggi-accent/20">
+                      <img src={p.preview} alt={p.file.name} className="w-full h-full object-cover" />
+                      <button
+                        type="button"
+                        onClick={() => removeLocalPreview(i)}
+                        className="absolute top-1 right-1 w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                        aria-label="Rimuovi immagine"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Uploaded images from Dataverse (only in edit mode) */}
+            {!isCreate && images && images.length > 0 && (
+              <div>
+                <p className="text-xs text-default-400 mb-2">Caricate ({images.length})</p>
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
+                  {images.map((img) => (
+                    <div key={img.annotationid} className="relative group aspect-square rounded-lg overflow-hidden border border-centoraggi-accent/20">
+                      <img
+                        src={`data:${img.mimetype};base64,${img.documentbody}`}
+                        alt={img.filename}
+                        className="w-full h-full object-cover cursor-pointer"
+                        onClick={() => {
+                          const w = window.open();
+                          if (w) {
+                            w.document.write(`<img src="data:${img.mimetype};base64,${img.documentbody}" style="max-width:100%;max-height:100vh;margin:auto;display:block" />`);
+                            w.document.title = img.filename;
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteImage(img.annotationid)}
+                        className="absolute top-1 right-1 w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                        aria-label="Elimina immagine"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                      <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-[10px] px-1 py-0.5 truncate">
+                        {img.filename}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {(!images || images.length === 0) && localPreviews.length === 0 && (
+              <p className="text-sm text-default-400 text-center py-4">Nessuna foto allegata</p>
+            )}
+          </CardBody>
+        </Card>
 
       {/* Luogo assistenza */}
       <Card shadow="sm" className="bg-white">
         <CardBody className="gap-2.5 p-3">
-          <p className="text-xs font-semibold text-[#184E77] uppercase tracking-wider">Luogo assistenza</p>
+          <p className="text-xs font-semibold text-centoraggi-deep uppercase tracking-wider">Luogo assistenza</p>
           <div className="flex gap-2">
             <div className="flex-1 relative" ref={suggestionsRef}>
               <input
@@ -738,15 +987,15 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
                   // Delay to allow click on suggestion
                   setTimeout(() => setInputFocused(false), 200);
                 }}
-                className="w-full h-[56px] px-3 rounded-xl border-2 border-[#168AAD]/30 bg-white text-sm outline-none focus:border-[#168AAD] transition-colors"
+                className="w-full h-[56px] px-3 rounded-xl border-2 border-centoraggi-accent/30 bg-white text-sm outline-none focus:border-centoraggi-accent transition-colors"
               />
               {inputFocused && suggestions.length > 0 && (
-                <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white rounded-lg shadow-lg border border-[#168AAD]/20 max-h-[200px] overflow-y-auto">
+                <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white rounded-lg shadow-lg border border-centoraggi-accent/20 max-h-[200px] overflow-y-auto">
                   {suggestions.map((s) => (
                     <button
                       key={s.place_id}
                       type="button"
-                      className="w-full text-left px-3 py-2.5 text-sm hover:bg-[#e8f4f8] transition-colors cursor-pointer border-b border-default-100 last:border-b-0"
+                      className="w-full text-left px-3 py-2.5 text-sm hover:bg-centoraggi-surface transition-colors cursor-pointer border-b border-default-100 last:border-b-0"
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => {
                         setIndirizzo(s.display_name);
@@ -757,10 +1006,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
                       }}
                     >
                       <div className="flex items-start gap-2">
-                        <svg className="w-4 h-4 mt-0.5 text-[#34A0A4] flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                        </svg>
+                        <MapPin className="w-4 h-4 mt-0.5 text-centoraggi-teal flex-shrink-0" />
                         <span className="text-default-700">{s.display_name}</span>
                       </div>
                     </button>
@@ -788,12 +1034,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
                 }
               }}
               className="mt-auto h-[56px]"
-              startContent={
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-              }
+              startContent={<MapPin className="w-5 h-5" />}
             >
               Mappa
             </Button>
@@ -803,16 +1044,12 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
               isDisabled={!indirizzo.trim()}
               onPress={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(indirizzo)}`, '_blank')}
               className="mt-auto h-[56px]"
-              startContent={
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                </svg>
-              }
+              startContent={<ExternalLink className="w-5 h-5" />}
             >
               Apri
             </Button>
           </div>
-          <div className="w-full rounded-lg overflow-hidden border border-[#168AAD]/20">
+          <div className="w-full rounded-lg overflow-hidden border border-centoraggi-accent/20">
             <iframe
               key={mapCenter ? `${mapCenter.lat},${mapCenter.lng}` : 'world'}
               title="Mappa luogo assistenza"
@@ -830,133 +1067,54 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
         </CardBody>
       </Card>
 
-      {/* Foto / Allegati */}
-        <Card shadow="sm" className="bg-white">
-          <CardBody className="gap-2.5 p-3">
+      {/* Floating back-to-top */}
+      <Button
+        isIconOnly
+        size="lg"
+        radius="full"
+        color="primary"
+        aria-label="Torna all'inizio"
+        onPress={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+        className="fixed bottom-5 right-24 md:right-5 z-40 shadow-lg bg-centoraggi-primary"
+      >
+        <ArrowUp className="w-5 h-5" />
+      </Button>
 
-            {/* Upload buttons */}
-            <div className="flex gap-2 flex-wrap">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={(e) => { handleFileSelect(e.target.files); e.target.value = ''; }}
-              />
-              <Button
-                color="primary"
-                variant="flat"
-                onPress={() => fileInputRef.current?.click()}
-                startContent={
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                  </svg>
-                }
-              >
-                Scegli immagini
+      {/* Floating timer FAB on mobile */}
+      <div className="md:hidden fixed bottom-5 right-5 z-50">
+        <div className="rounded-2xl border border-centoraggi-accent/25 bg-white/95 backdrop-blur shadow-xl px-2 py-2">
+          <p className="text-[10px] uppercase tracking-wider text-default-400 px-1">Timer</p>
+          <p className={`font-mono text-sm font-bold px-1 ${
+            timerStatus === 'running'
+              ? 'text-emerald-600'
+              : timerStatus === 'paused'
+                ? 'text-amber-600'
+                : 'text-slate-600'
+          }`}>
+            {timerDisplay}
+          </p>
+          <div className="mt-1 flex items-center gap-1">
+            {timerRunning ? (
+              <Button size="sm" isIconOnly variant="flat" className="bg-orange-100 text-orange-700" onPress={handlePauseTimer} aria-label="Pausa timer">
+                <Pause className="w-4 h-4" />
               </Button>
-              <input
-                ref={(el) => { if (el) el.setAttribute('capture', 'environment'); }}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                id="cameraInput"
-                className="hidden"
-                onChange={(e) => { handleFileSelect(e.target.files); e.target.value = ''; }}
-              />
-              <Button
-                color="secondary"
-                variant="flat"
-                onPress={() => document.getElementById('cameraInput')?.click()}
-                startContent={
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                }
-              >
-                Scatta foto
+            ) : (
+              <Button size="sm" isIconOnly color="success" variant="flat" onPress={handleStartTimer} aria-label="Avvia timer">
+                <Play className="w-4 h-4" />
               </Button>
-              {localPreviews.length > 0 && !isCreate && (
-                <Button
-                  color="primary"
-                  isLoading={uploading}
-                  onPress={() => uploadAllImages()}
-                  startContent={!uploading ?
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                    </svg> : undefined
-                  }
-                >
-                  Carica {localPreviews.length} immagin{localPreviews.length === 1 ? 'e' : 'i'}
-                </Button>
-              )}
-            </div>
-
-            {/* Local previews (not yet uploaded) */}
-            {localPreviews.length > 0 && (
-              <div>
-                <p className="text-xs text-default-400 mb-2">
-                  Da caricare{isCreate ? ' (verranno caricate al salvataggio)' : ''}
-                </p>
-                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
-                  {localPreviews.map((p, i) => (
-                    <div key={i} className="relative group aspect-square rounded-lg overflow-hidden border border-[#168AAD]/20">
-                      <img src={p.preview} alt={p.file.name} className="w-full h-full object-cover" />
-                      <button
-                        type="button"
-                        onClick={() => removeLocalPreview(i)}
-                        className="absolute top-1 right-1 w-6 h-6 rounded-full bg-red-500 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
             )}
-
-            {/* Uploaded images from Dataverse (only in edit mode) */}
-            {!isCreate && images && images.length > 0 && (
-              <div>
-                <p className="text-xs text-default-400 mb-2">Caricate ({images.length})</p>
-                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
-                  {images.map((img) => (
-                    <div key={img.annotationid} className="relative group aspect-square rounded-lg overflow-hidden border border-[#168AAD]/20">
-                      <img
-                        src={`data:${img.mimetype};base64,${img.documentbody}`}
-                        alt={img.filename}
-                        className="w-full h-full object-cover cursor-pointer"
-                        onClick={() => {
-                          const w = window.open();
-                          if (w) {
-                            w.document.write(`<img src="data:${img.mimetype};base64,${img.documentbody}" style="max-width:100%;max-height:100vh;margin:auto;display:block" />`);
-                            w.document.title = img.filename;
-                          }
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteImage(img.annotationid)}
-                        className="absolute top-1 right-1 w-6 h-6 rounded-full bg-red-500 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                      >
-                        ✕
-                      </button>
-                      <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-[10px] px-1 py-0.5 truncate">
-                        {img.filename}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {(!images || images.length === 0) && localPreviews.length === 0 && (
-              <p className="text-sm text-default-400 text-center py-4">Nessuna foto allegata</p>
-            )}
-          </CardBody>
-        </Card>
+            <Button size="sm" isIconOnly color="danger" variant="flat" onPress={handleStopTimer} aria-label="Ferma timer" isDisabled={timerSeconds === 0}>
+              <Square className="w-4 h-4" />
+            </Button>
+            <Button size="sm" isIconOnly color="primary" variant="flat" onPress={applyTimerToOre} aria-label="Applica ore" isDisabled={timerSeconds === 0}>
+              <Check className="w-4 h-4" />
+            </Button>
+            <Button size="sm" isIconOnly variant="flat" onPress={handleClearTimer} aria-label="Elimina timer" isDisabled={timerSeconds === 0}>
+              <Trash2 className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

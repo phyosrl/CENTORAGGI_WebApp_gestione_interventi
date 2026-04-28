@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Card, CardBody, addToast } from '@heroui/react';
+import { MapPin } from 'lucide-react';
 
 interface NominatimResult {
   place_id: number;
@@ -108,7 +109,7 @@ export default function MapWidget({ indirizzo, onChange }: MapWidgetProps) {
   return (
     <Card shadow="sm" className="bg-white">
       <CardBody className="gap-2.5 p-3">
-        <p className="text-xs font-semibold text-[#184E77] uppercase tracking-wider">Luogo assistenza</p>
+        <p className="text-xs font-semibold text-centoraggi-deep uppercase tracking-wider">Luogo assistenza</p>
 
         <div className="flex gap-2">
           <div className="flex-1 relative" ref={suggestionsRef}>
@@ -125,16 +126,16 @@ export default function MapWidget({ indirizzo, onChange }: MapWidgetProps) {
               }}
               onFocus={() => setInputFocused(true)}
               onBlur={() => setTimeout(() => setInputFocused(false), 200)}
-              className="w-full h-[56px] px-3 rounded-xl border-2 border-[#168AAD]/30 bg-white text-sm outline-none focus:border-[#168AAD] transition-colors"
+              className="w-full h-[56px] px-3 rounded-xl border-2 border-centoraggi-accent/30 bg-white text-sm outline-none focus:border-centoraggi-accent transition-colors"
             />
 
             {inputFocused && suggestions.length > 0 && (
-              <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white rounded-lg shadow-lg border border-[#168AAD]/20 max-h-[200px] overflow-y-auto">
+              <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white rounded-lg shadow-lg border border-centoraggi-accent/20 max-h-[200px] overflow-y-auto">
                 {suggestions.map((s) => (
                   <button
                     key={s.place_id}
                     type="button"
-                    className="w-full text-left px-3 py-2.5 text-sm hover:bg-[#e8f4f8] transition-colors cursor-pointer border-b border-default-100 last:border-b-0"
+                    className="w-full text-left px-3 py-2.5 text-sm hover:bg-centoraggi-surface transition-colors cursor-pointer border-b border-default-100 last:border-b-0"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => {
                       onChange(s.display_name);
@@ -145,10 +146,7 @@ export default function MapWidget({ indirizzo, onChange }: MapWidgetProps) {
                     }}
                   >
                     <div className="flex items-start gap-2">
-                      <svg className="w-4 h-4 mt-0.5 text-[#34A0A4] flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                      </svg>
+                      <MapPin className="w-4 h-4 mt-0.5 text-centoraggi-teal flex-shrink-0" />
                       <span className="text-default-700">{s.display_name}</span>
                     </div>
                   </button>
@@ -172,7 +170,7 @@ export default function MapWidget({ indirizzo, onChange }: MapWidgetProps) {
         </div>
 
         {(showMap || mapCenter) && (
-          <div className="w-full rounded-lg overflow-hidden border border-[#168AAD]/20">
+          <div className="w-full rounded-lg overflow-hidden border border-centoraggi-accent/20">
             <iframe
               key={mapCenter ? `${mapCenter.lat},${mapCenter.lng}` : 'world'}
               title="Mappa luogo assistenza"

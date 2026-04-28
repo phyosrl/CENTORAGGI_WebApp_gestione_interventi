@@ -1,4 +1,7 @@
 import React, { useMemo, useState, useCallback } from 'react';
+import { motion } from 'framer-motion';
+import { fadeInUp, staggerContainer } from './motion';
+import { Search, Inbox } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Table,
@@ -11,7 +14,6 @@ import {
   Select,
   SelectItem,
   Chip,
-  Spinner,
   Card,
   CardBody,
   CardHeader,
@@ -21,6 +23,7 @@ import {
 } from '@heroui/react';
 import { fetchCommesse } from '../services/api';
 import { Commessa, CommessaRaw, mapCommessa, TipologiaCommessaMap } from '../types/commessa';
+import ListSkeleton from './skeletons/ListSkeleton';
 
 const tipologiaOptions = Object.entries(TipologiaCommessaMap).map(([value, label]) => ({
   value,
@@ -113,14 +116,7 @@ export default function CommesseList() {
   }, []);
 
   if (isLoading) {
-    return (
-      <Card className="shadow-md">
-        <CardBody className="flex flex-col items-center justify-center py-24 gap-4">
-          <Spinner size="lg" color="primary" />
-          <p className="text-default-400 text-sm">Caricamento commesse...</p>
-        </CardBody>
-      </Card>
-    );
+    return <ListSkeleton rows={8} statsCount={2} />;
   }
 
   if (error) {
@@ -143,9 +139,17 @@ export default function CommesseList() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <motion.div
+      className="flex flex-col gap-6"
+      variants={staggerContainer}
+      initial="hidden"
+      animate="visible"
+    >
       {/* Header + Stats */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <motion.div
+        variants={fadeInUp}
+        className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+      >
         <div>
           <h1 className="text-2xl font-bold text-foreground">Commesse</h1>
           <p className="text-default-400 text-sm mt-0.5">
@@ -166,9 +170,10 @@ export default function CommesseList() {
             </div>
           </Card>
         </div>
-      </div>
+      </motion.div>
 
-      {/* Filters Card */}
+      {/* Filters Card (sticky in mobile) */}
+      <div className="sticky top-0 z-30 -mx-3 sm:-mx-0 px-3 sm:px-0 py-2 sm:py-0 bg-white/80 lg:bg-transparent backdrop-blur lg:backdrop-blur-0 border-b border-default-200/60 lg:border-0 lg:static">
       <Card shadow="sm" className="bg-white">
         <CardBody className="gap-4">
           <div className="flex flex-col lg:flex-row gap-3 items-end">
@@ -182,11 +187,7 @@ export default function CommesseList() {
               className="lg:flex-1"
               variant="bordered"
               size="sm"
-              startContent={
-                <svg className="w-4 h-4 text-default-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-              }
+              startContent={<Search className="w-4 h-4 text-default-400 flex-shrink-0" />}
             />
             <Select
               label="Tipologia"
@@ -242,6 +243,7 @@ export default function CommesseList() {
           )}
         </CardBody>
       </Card>
+      </div>
 
       {/* Table */}
       <Card shadow="sm" className="bg-white overflow-hidden">
@@ -268,9 +270,7 @@ export default function CommesseList() {
           <TableBody
             emptyContent={
               <div className="flex flex-col items-center py-10 gap-2">
-                <svg className="w-12 h-12 text-default-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-3-3v6m-7 4h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                </svg>
+                <Inbox className="w-12 h-12 text-default-200" strokeWidth={1.5} />
                 <p className="text-default-400 text-sm">Nessuna commessa trovata</p>
                 {hasFilters && (
                   <Button size="sm" variant="flat" onPress={clearFilters}>
@@ -337,6 +337,6 @@ export default function CommesseList() {
           </TableBody>
         </Table>
       </Card>
-    </div>
+    </motion.div>
   );
 }

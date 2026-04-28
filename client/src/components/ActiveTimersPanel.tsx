@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Card, CardBody, Chip, addToast } from '@heroui/react';
+import { Save, Play, Pause, Square, Check, RotateCcw, Trash2 } from 'lucide-react';
 import { formatTimerDuration, getActiveTimers, upsertActiveTimer, removeActiveTimer, type ActiveTimerItem } from '../services/timerStore';
 
 export default function ActiveTimersPanel() {
@@ -82,8 +83,9 @@ export default function ActiveTimersPanel() {
                           addToast({ title: 'Salvato', color: 'success' });
                         }}
                         aria-label="Salva registrazione"
+                        startContent={<Save className="w-4 h-4" />}
                       >
-                        💾 Salva
+                        Salva
                       </Button>
                     </div>
                   </div>
@@ -104,8 +106,9 @@ export default function ActiveTimersPanel() {
                         setTimers(getActiveTimers());
                         addToast({ title: 'Timer avviato', color: 'success' });
                       }}
+                      startContent={<Play className="w-3.5 h-3.5" />}
                     >
-                      ▶ Avvia
+                      Avvia
                     </Button>
 
                     <Button
@@ -123,8 +126,9 @@ export default function ActiveTimersPanel() {
                         setTimers(getActiveTimers());
                         addToast({ title: 'Timer in pausa', color: 'warning' });
                       }}
+                      startContent={<Pause className="w-3.5 h-3.5" />}
                     >
-                      ⏸ Pausa
+                      Pausa
                     </Button>
 
                     <Button
@@ -147,8 +151,9 @@ export default function ActiveTimersPanel() {
                           color: 'success',
                         });
                       }}
+                      startContent={<Square className="w-3.5 h-3.5" />}
                     >
-                      ■ Stop
+                      Stop
                     </Button>
 
                     <Button
@@ -166,8 +171,9 @@ export default function ActiveTimersPanel() {
                           color: 'success',
                         });
                       }}
+                      startContent={<Check className="w-3.5 h-3.5" />}
                     >
-                      ✓ Conferma e chiudi
+                      Conferma e chiudi
                     </Button>
 
                     <Button
@@ -186,8 +192,9 @@ export default function ActiveTimersPanel() {
                         setTimers(getActiveTimers());
                         addToast({ title: 'Timer riavviato', color: 'secondary' });
                       }}
+                      startContent={<RotateCcw className="w-3.5 h-3.5" />}
                     >
-                      ↻ Riavvia
+                      Riavvia
                     </Button>
 
                     <Button
@@ -200,8 +207,9 @@ export default function ActiveTimersPanel() {
                         setTimers(getActiveTimers());
                         addToast({ title: 'Timer eliminato', color: 'default' });
                       }}
+                      startContent={<Trash2 className="w-3.5 h-3.5" />}
                     >
-                      🗑 Elimina
+                      Elimina
                     </Button>
                   </div>
                 </div>

@@ -104,13 +104,19 @@ export async function updateAssistenza(request: HttpRequest): Promise<HttpRespon
     if ('_phyo_rifassistenza_value' in sanitized) {
       const rifId = sanitized._phyo_rifassistenza_value as string | null;
       delete sanitized._phyo_rifassistenza_value;
-      sanitized['phyo_RifAssistenza@odata.bind'] = rifId ? `/phyo_assistenzes(${rifId})` : null;
+      // Dataverse non accetta @odata.bind=null su PATCH; per dissociare serve un DELETE
+      // sulla navigation property. Omettiamo la binding se il valore è null.
+      if (rifId) {
+        sanitized['phyo_RifAssistenza@odata.bind'] = `/phyo_assistenzes(${rifId})`;
+      }
     }
 
     if ('_phyo_cliente_value' in sanitized) {
       const clienteId = sanitized._phyo_cliente_value as string | null;
       delete sanitized._phyo_cliente_value;
-      sanitized['phyo_Cliente@odata.bind'] = clienteId ? `/accounts(${clienteId})` : null;
+      if (clienteId) {
+        sanitized['phyo_Cliente@odata.bind'] = `/accounts(${clienteId})`;
+      }
     }
 
     await dataverseService.updateAssistenza(id, sanitized);
@@ -162,12 +168,16 @@ export async function createAssistenza(request: HttpRequest): Promise<HttpRespon
       const rifId = sanitized._phyo_rifassistenza_value as string;
       delete sanitized._phyo_rifassistenza_value;
       sanitized['phyo_RifAssistenza@odata.bind'] = `/phyo_assistenzes(${rifId})`;
+    } else {
+      delete sanitized._phyo_rifassistenza_value;
     }
 
     if (sanitized._phyo_cliente_value) {
       const clienteId = sanitized._phyo_cliente_value as string;
       delete sanitized._phyo_cliente_value;
       sanitized['phyo_Cliente@odata.bind'] = `/accounts(${clienteId})`;
+    } else {
+      delete sanitized._phyo_cliente_value;
     }
 
     const nextNr = await dataverseService.getNextAssistenzaNr();
