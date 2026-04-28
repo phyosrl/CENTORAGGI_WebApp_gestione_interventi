@@ -28,6 +28,7 @@ import { AssistenzaRegistrazione } from '../types/assistenzaRegistrazione';
 import { updateAssistenza, UpdateAssistenzaPayload, createAssistenza, CreateAssistenzaPayload, fetchAccounts, fetchRifAssistenze, fetchImages, uploadImage, deleteImage, Annotation, geocodeAddress, GeocodeResult } from '../services/api';
 import { getActiveTimer, removeActiveTimer, upsertActiveTimer } from '../services/timerStore';
 import AssistenzaImagesSection from './assistenza/AssistenzaImagesSection';
+import SignatureWidget, { SIGNATURE_SUBJECT } from './assistenza/SignatureWidget';
 
 type NominatimResult = GeocodeResult;
 
@@ -312,8 +313,19 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
     staleTime: 60 * 1000,
   });
 
+  // Separa la firma cliente dalle immagini standard
+  const signatureAnnotation = useMemo(
+    () => images?.find((img) => img.subject === SIGNATURE_SUBJECT) ?? null,
+    [images],
+  );
+  const filteredImages = useMemo(
+    () => images?.filter((img) => img.subject !== SIGNATURE_SUBJECT),
+    [images],
+  );
+
   const [localPreviews, setLocalPreviews] = useState<{ file: File; preview: string }[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [pendingSignature, setPendingSignature] = useState<string | null>(null);
 
   const handleFileSelect = useCallback((files: FileList | null) => {
     if (!files) return;
@@ -532,6 +544,14 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
         });
         if (localPreviews.length > 0 && result?.id) {
           await uploadAllImages(result.id);
+        }
+        if (pendingSignature && result?.id) {
+          try {
+            await uploadImage(result.id, 'firma_cliente.png', 'image/png', pendingSignature, SIGNATURE_SUBJECT);
+            setPendingSignature(null);
+          } catch {
+            addToast({ title: 'Attenzione', description: 'Firma non caricata, riprovare dal dettaglio', color: 'warning' });
+          }
         }
         queryClient.invalidateQueries({ queryKey: ['assistenzeRegistrazioni'] });
         addToast({
@@ -978,10 +998,20 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
         </CardBody>
       </Card>
 
+      {/* Firma cliente */}
+      <SignatureWidget
+        registrazioneId={assistenza?.id}
+        isCreate={isCreate}
+        existingSignature={signatureAnnotation}
+        pendingSignature={pendingSignature}
+        onPendingChange={setPendingSignature}
+        onSaved={() => refetchImages()}
+      />
+
       {/* Foto / Allegati */}
       <AssistenzaImagesSection
         isCreate={isCreate}
-        images={images}
+        images={filteredImages}
         localPreviews={localPreviews}
         uploading={uploading}
         onFileSelect={handleFileSelect}

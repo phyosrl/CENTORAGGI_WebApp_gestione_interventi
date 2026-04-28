@@ -1,6 +1,7 @@
 import React, { memo } from 'react';
 import { motion } from 'framer-motion';
-import { Card, CardBody, Button } from '@heroui/react';
+import { Card, CardBody } from '@heroui/react';
+import { MapPin } from 'lucide-react';
 import { fadeInUp } from './motion';
 import { AssistenzaRegistrazione } from '../types/assistenzaRegistrazione';
 
@@ -13,16 +14,6 @@ function formatDate(dateStr: string | null): string {
   });
 }
 
-function formatNumber(value: number | null): string {
-  if (value == null) return '—';
-  return value.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-function formatCurrency(value: number | null): string {
-  if (value == null) return '—';
-  return value.toLocaleString('it-IT', { style: 'currency', currency: 'EUR' });
-}
-
 interface Props {
   a: AssistenzaRegistrazione;
   isRunning: boolean;
@@ -31,60 +22,51 @@ interface Props {
 }
 
 const AssistenzaMobileCardImpl: React.FC<Props> = ({ a, isRunning, statusChip, onOpen }) => {
+  const address = a.indirizzoAssistenza;
+  const hasAddr = !!(address && address.trim());
+  const mapHref = hasAddr ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address!.trim())}` : undefined;
   return (
     <motion.div variants={fadeInUp}>
-      <Card shadow="sm" className={isRunning ? 'bg-[#fff8e8] border border-warning/30' : 'bg-white'}>
-        <CardBody className="p-3">
-          <div className="flex justify-between items-start">
-            <div>
-              <span className="font-mono text-xs text-white bg-centoraggi-teal px-2 py-0.5 rounded">
+      <Card
+        shadow="sm"
+        isPressable
+        onPress={() => onOpen(a)}
+        className={`w-full ${isRunning ? 'bg-[#fff8e8] border border-warning/30' : 'bg-white'}`}
+      >
+        <CardBody className="p-2 gap-1">
+          <div className="flex justify-between items-center gap-2">
+            <div className="min-w-0 flex items-center gap-1.5 flex-wrap">
+              <span className="font-mono text-[11px] text-white bg-centoraggi-teal px-1.5 py-0.5 rounded">
                 {a.nr}
               </span>
-              <span className="text-sm font-medium ml-2">{a.rifAssistenzaNome || '—'}</span>
+              <span className="text-sm font-medium truncate">{a.rifAssistenzaNome || a.clienteNome || '—'}</span>
             </div>
-            <div className="flex gap-1">{statusChip}</div>
-          </div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm mt-2">
-            <div>
-              <span className="text-default-400 text-xs">Data</span>
-              <p className="text-default-600">{formatDate(a.data)}</p>
-            </div>
-            <div>
-              <span className="text-default-400 text-xs">Cliente</span>
-              <p className="text-default-600">{a.clienteNome || '—'}</p>
-            </div>
-            <div>
-              <span className="text-default-400 text-xs">Tipologia</span>
-              <p className="text-default-600">{a.tipologiaAssistenza || '—'}</p>
-            </div>
-            <div>
-              <span className="text-default-400 text-xs">Rif. Assistenza</span>
-              <p className="text-default-600">{a.rifAssistenzaNome || '—'}</p>
-            </div>
-            <div>
-              <span className="text-default-400 text-xs">Att.ne</span>
-              <p className="text-default-600">{a.attne || '—'}</p>
-            </div>
-            <div>
-              <span className="text-default-400 text-xs">Ore Int.</span>
-              <p className="font-medium tabular-nums">{formatNumber(a.oreIntervento)}</p>
-            </div>
-            <div>
-              <span className="text-default-400 text-xs">Ore</span>
-              <p className="font-medium tabular-nums">{formatNumber(a.ore)}</p>
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <a
+                href={mapHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Apri in Google Maps"
+                title={hasAddr ? address! : 'Indirizzo non disponibile'}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!hasAddr) e.preventDefault();
+                }}
+                className={`inline-flex items-center justify-center w-7 h-7 rounded-md transition-colors ${
+                  hasAddr
+                    ? 'bg-emerald-100 text-emerald-600 hover:bg-emerald-200'
+                    : 'bg-default-100 text-default-300 cursor-not-allowed pointer-events-none'
+                }`}
+              >
+                <MapPin className="w-3.5 h-3.5" />
+              </a>
+              {statusChip}
             </div>
           </div>
-          {a.descrizioneIntervento && (
-            <div className="text-sm mt-1">
-              <span className="text-default-400 text-xs">Descrizione</span>
-              <p className="text-default-600">{a.descrizioneIntervento}</p>
-            </div>
-          )}
-          <div className="flex justify-between items-center mt-2">
-            <Button size="sm" color="primary" variant="flat" onPress={() => onOpen(a)}>
-              Apri
-            </Button>
-            <span className="text-sm font-medium tabular-nums">{formatCurrency(a.totale)}</span>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-default-600">
+            <span className="tabular-nums">{formatDate(a.data)}</span>
+            {a.clienteNome && <span className="truncate max-w-[60%]">{a.clienteNome}</span>}
+            {a.tipologiaAssistenza && <span className="truncate max-w-[60%] text-default-500">{a.tipologiaAssistenza}</span>}
           </div>
         </CardBody>
       </Card>

@@ -539,36 +539,37 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
 
   return (
     <motion.div
-      className="flex flex-col gap-4 sm:gap-6"
+      className="flex flex-col gap-3 sm:gap-6"
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
     >
       {/* Header + Stats */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-foreground">Le mie registrazioni</h1>
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-3">
+        <div className="min-w-0">
+          <h1 className="text-lg sm:text-2xl font-bold text-foreground">Le mie registrazioni</h1>
           <div className="flex items-center gap-2 mt-0.5">
             <Chip size="sm" variant="flat" color="success">
               {allLoaded ? assistenze.length : `${loadedCount} / ${totalCount}`}
             </Chip>
-            <span className="text-default-400 text-sm">registrazion{assistenze.length === 1 ? 'e' : 'i'}{!allLoaded ? ' caricate' : ' totali'}</span>
+            <span className="text-default-400 text-xs sm:text-sm">registrazion{assistenze.length === 1 ? 'e' : 'i'}{!allLoaded ? ' caricate' : ' totali'}</span>
           </div>
         </div>
-        <Button color="primary" onPress={onCreateNew} size="sm">
-          + Crea nuova registrazione
+        <Button color="primary" onPress={onCreateNew} size="sm" className="w-full sm:w-auto">
+          + Nuova registrazione
         </Button>
       </div>
 
       {/* View mode toggle + filtri (sticky in mobile) */}
-      <div className="sticky top-0 z-30 -mx-3 sm:-mx-4 px-3 sm:px-4 py-2 sm:py-0 bg-white/80 sm:bg-transparent backdrop-blur sm:backdrop-blur-0 border-b border-default-200/60 sm:border-0 sm:static">
-      <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
-        <div className="flex gap-1 bg-default-100 rounded-lg p-1">
+      <div className="sticky top-[calc(4.5rem+44px)] sm:top-0 z-30 -mx-2 sm:-mx-4 px-2 sm:px-4 py-1.5 sm:py-0 bg-white/90 sm:bg-transparent backdrop-blur sm:backdrop-blur-0 border-b border-default-200/60 sm:border-0 sm:static">
+      <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 sm:items-center">
+        <div className="flex gap-0.5 bg-default-100 rounded-lg p-0.5 sm:p-1 w-full sm:w-auto">
           <Button
             size="sm"
             variant={viewMode === 'global' ? 'solid' : 'light'}
             color={viewMode === 'global' ? 'primary' : 'default'}
             onPress={() => setViewMode('global')}
+            className="flex-1 sm:flex-none px-2 sm:px-3"
           >
             Globale
           </Button>
@@ -577,16 +578,18 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
             variant={viewMode === 'grouped' ? 'solid' : 'light'}
             color={viewMode === 'grouped' ? 'primary' : 'default'}
             onPress={() => setViewMode('grouped')}
+            className="flex-1 sm:flex-none px-2 sm:px-3"
           >
-            Raggruppata
+            Raggrupp.
           </Button>
           <Button
             size="sm"
             variant={viewMode === 'manutenzioni' ? 'solid' : 'light'}
             color={viewMode === 'manutenzioni' ? 'secondary' : 'default'}
             onPress={() => setViewMode('manutenzioni')}
+            className="flex-1 sm:flex-none px-2 sm:px-3"
           >
-            Manutenzioni
+            Manuten.
           </Button>
         </div>
         <Input
@@ -647,7 +650,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
 
       {/* Stats cards */}
       <motion.div
-        className="flex gap-2 flex-wrap"
+        className="flex gap-1.5 sm:gap-2 flex-wrap"
         variants={staggerContainer}
         initial="hidden"
         animate="visible"
@@ -656,12 +659,12 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
           .filter((g) => viewMode !== 'manutenzioni' || (g.stato !== 'Chiuso' && g.stato !== 'Sospeso'))
           .map((g) => (
           <motion.div key={g.stato} variants={fadeInUp}>
-            <Card shadow="sm" className="px-3 py-1.5">
+            <Card shadow="sm" className="px-2 py-1 sm:px-3 sm:py-1.5">
               <div className="text-center">
-                <p className="text-lg sm:text-xl font-bold" style={{ color: `var(--heroui-${statoRegColor[g.stato] || 'default'})` }}>
+                <p className="text-base sm:text-xl font-bold leading-tight" style={{ color: `var(--heroui-${statoRegColor[g.stato] || 'default'})` }}>
                   {g.items.length}
                 </p>
-                <p className="text-tiny text-default-400">{g.stato}</p>
+                <p className="text-[10px] sm:text-tiny text-default-400 leading-tight">{g.stato}</p>
               </div>
             </Card>
           </motion.div>
@@ -830,62 +833,32 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                   ) : (
                   <>
                   {/* Mobile cards */}
-                  <div className="flex flex-col gap-2 p-3 sm:hidden">
+                  <div className="flex flex-col gap-1.5 p-2 sm:hidden">
                     {group.items.map((a) => (
-                      <div key={a.id} className={`rounded-lg p-3 border ${runningTimerIds.has(a.id) ? 'bg-[#fff8e8] border-warning/30' : 'border-default-200'}`}>
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <span className="font-mono text-xs text-white bg-centoraggi-teal px-2 py-0.5 rounded">
+                      <div
+                        key={a.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => onOpen(a)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(a); } }}
+                        className={`rounded-lg p-2 border cursor-pointer active:bg-default-100 ${runningTimerIds.has(a.id) ? 'bg-[#fff8e8] border-warning/30' : 'border-default-200'}`}
+                      >
+                        <div className="flex justify-between items-center gap-2">
+                          <div className="min-w-0 flex items-center gap-1.5 flex-wrap">
+                            <span className="font-mono text-[11px] text-white bg-centoraggi-teal px-1.5 py-0.5 rounded">
                               {a.nr}
                             </span>
-                            <span className="text-sm font-medium ml-2">{a.rifAssistenzaNome || '—'}</span>
+                            <span className="text-sm font-medium truncate">{a.rifAssistenzaNome || a.clienteNome || '—'}</span>
                           </div>
-                          {renderStatusChip(a)}
-                        </div>
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm mt-2">
-                          <div>
-                            <span className="text-default-400 text-xs">Data</span>
-                            <p className="text-default-600">{formatDate(a.data)}</p>
-                          </div>
-                          <div>
-                            <span className="text-default-400 text-xs">Att.ne</span>
-                            <p className="text-default-600">{a.attne || '—'}</p>
-                          </div>
-                          <div>
-                            <span className="text-default-400 text-xs">Ore Int.</span>
-                            <p className="font-medium tabular-nums">{formatNumber(a.oreIntervento)}</p>
-                          </div>
-                          <div>
-                            <span className="text-default-400 text-xs">Ore</span>
-                            <p className="font-medium tabular-nums">{formatNumber(a.ore)}</p>
-                          </div>
-                        </div>
-                        <div className="text-sm mt-1">
-                          <span className="text-default-400 text-xs">Rif. Assistenza</span>
-                          <p className="text-default-600">{a.rifAssistenzaNome || '—'}</p>
-                        </div>
-                        <div className="text-sm mt-1">
-                          <span className="text-default-400 text-xs">Tipologia</span>
-                          <p className="text-default-600">{a.tipologiaAssistenza || '—'}</p>
-                        </div>
-                        {a.descrizioneIntervento && (
-                          <div className="text-sm mt-1">
-                            <span className="text-default-400 text-xs">Descrizione</span>
-                            <p className="text-default-600">{a.descrizioneIntervento}</p>
-                          </div>
-                        )}
-                        {a.materialeUtilizzato && (
-                          <div className="text-sm mt-1">
-                            <span className="text-default-400 text-xs">Materiale</span>
-                            <p className="text-default-600">{a.materialeUtilizzato}</p>
-                          </div>
-                        )}
-                        <div className="flex justify-between items-center mt-2">
-                          <div className="flex gap-1">
-                            <Button size="sm" color="primary" variant="flat" onPress={() => onOpen(a)}>Apri</Button>
+                          <div className="flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
                             <MapButton address={a.indirizzoAssistenza} />
+                            {renderStatusChip(a)}
                           </div>
-                          <span className="text-sm font-medium tabular-nums">{formatCurrency(a.totale)}</span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-default-600 mt-1">
+                          <span className="tabular-nums">{formatDate(a.data)}</span>
+                          {a.clienteNome && <span className="truncate max-w-[60%]">{a.clienteNome}</span>}
+                          {a.tipologiaAssistenza && <span className="truncate max-w-[60%] text-default-500">{a.tipologiaAssistenza}</span>}
                         </div>
                       </div>
                     ))}
@@ -1017,58 +990,32 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
                     ) : (
                     <>
                     {/* Mobile cards */}
-                    <div className="flex flex-col gap-2 p-3 sm:hidden">
+                    <div className="flex flex-col gap-1.5 p-2 sm:hidden">
                       {group.items.map((a) => (
-                        <div key={a.id} className={`rounded-lg p-3 border ${runningTimerIds.has(a.id) ? 'bg-[#fff8e8] border-warning/30' : 'border-default-200'}`}>
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <span className="font-mono text-xs text-white bg-centoraggi-teal px-2 py-0.5 rounded">
+                        <div
+                          key={a.id}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => onOpen(a)}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(a); } }}
+                          className={`rounded-lg p-2 border cursor-pointer active:bg-default-100 ${runningTimerIds.has(a.id) ? 'bg-[#fff8e8] border-warning/30' : 'border-default-200'}`}
+                        >
+                          <div className="flex justify-between items-center gap-2">
+                            <div className="min-w-0 flex items-center gap-1.5 flex-wrap">
+                              <span className="font-mono text-[11px] text-white bg-centoraggi-teal px-1.5 py-0.5 rounded">
                                 {a.nr}
                               </span>
-                              <span className="text-sm font-medium ml-2">{a.rifAssistenzaNome || '—'}</span>
+                              <span className="text-sm font-medium truncate">{a.rifAssistenzaNome || a.clienteNome || '—'}</span>
                             </div>
-                            {renderStatusChip(a)}
-                          </div>
-                          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm mt-2">
-                            <div>
-                              <span className="text-default-400 text-xs">Data</span>
-                              <p className="text-default-600">{formatDate(a.data)}</p>
-                            </div>
-                            <div>
-                              <span className="text-default-400 text-xs">Att.ne</span>
-                              <p className="text-default-600">{a.attne || '—'}</p>
-                            </div>
-                            <div>
-                              <span className="text-default-400 text-xs">Ore Int.</span>
-                              <p className="font-medium tabular-nums">{formatNumber(a.oreIntervento)}</p>
-                            </div>
-                            <div>
-                              <span className="text-default-400 text-xs">Ore</span>
-                              <p className="font-medium tabular-nums">{formatNumber(a.ore)}</p>
-                            </div>
-                          </div>
-                          <div className="text-sm mt-1">
-                            <span className="text-default-400 text-xs">Tipologia</span>
-                            <p className="text-default-600">{a.tipologiaAssistenza || '—'}</p>
-                          </div>
-                          {a.descrizioneIntervento && (
-                            <div className="text-sm mt-1">
-                              <span className="text-default-400 text-xs">Descrizione</span>
-                              <p className="text-default-600">{a.descrizioneIntervento}</p>
-                            </div>
-                          )}
-                          {a.materialeUtilizzato && (
-                            <div className="text-sm mt-1">
-                              <span className="text-default-400 text-xs">Materiale</span>
-                              <p className="text-default-600">{a.materialeUtilizzato}</p>
-                            </div>
-                          )}
-                          <div className="flex justify-between items-center mt-2">
-                            <div className="flex gap-1">
-                              <Button size="sm" color="primary" variant="flat" onPress={() => onOpen(a)}>Apri</Button>
+                            <div className="flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
                               <MapButton address={a.indirizzoAssistenza} />
+                              {renderStatusChip(a)}
                             </div>
-                            <span className="text-sm font-medium tabular-nums">{formatCurrency(a.totale)}</span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-default-600 mt-1">
+                            <span className="tabular-nums">{formatDate(a.data)}</span>
+                            {a.clienteNome && <span className="truncate max-w-[60%]">{a.clienteNome}</span>}
+                            {a.tipologiaAssistenza && <span className="truncate max-w-[60%] text-default-500">{a.tipologiaAssistenza}</span>}
                           </div>
                         </div>
                       ))}

@@ -1,8 +1,8 @@
 import React, { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Button, Card, CardBody, Spinner } from '@heroui/react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Button, Card, CardBody, Spinner, addToast } from '@heroui/react';
 import { ChevronLeft, ChevronRight, MapPin } from 'lucide-react';
-import { fetchAssistenzeRegistrazioni, fetchRifAssistenze } from '../services/api';
+import { fetchAssistenzeRegistrazioni, fetchRifAssistenze, updateAssistenza } from '../services/api';
 import { AssistenzaRegistrazione, mapAssistenzaRegistrazione } from '../types/assistenzaRegistrazione';
 
 interface CalendarPageProps {
@@ -55,6 +55,9 @@ function buildWeekGrid(current: Date) {
 export default function CalendarPage({ risorsaId, onOpen, onCreateNew }: CalendarPageProps) {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<'month' | 'week' | 'day'>('month');
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['assistenze-calendar', risorsaId],
@@ -130,18 +133,107 @@ export default function CalendarPage({ risorsaId, onOpen, onCreateNew }: Calenda
     });
   };
 
+  // --- Drag & Drop: sposta intervento tra giorni ---
+  const moveMutation = useMutation({
+    mutationFn: async ({ id, newDateISO }: { id: string; newDateISO: string }) => {
+      await updateAssistenza(id, { phyo_data: newDateISO });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['assistenze-calendar', risorsaId] });
+      queryClient.invalidateQueries({ queryKey: ['assistenzeRegistrazioni'] });
+      addToast({ title: 'Intervento spostato', color: 'success' });
+    },
+    onError: () => {
+      addToast({ title: 'Errore', description: 'Impossibile spostare l\u2019intervento', color: 'danger' });
+    },
+  });
+
+  const handleEventDragStart = (e: React.DragEvent, event: AssistenzaRegistrazione) => {
+    setDraggingId(event.id);
+    e.dataTransfer.setData('text/plain', event.id);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleEventDragEnd = () => {
+    setDraggingId(null);
+    setDragOverKey(null);
+  };
+
+  const handleCellDragOver = (e: React.DragEvent, key: string) => {
+    if (!draggingId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverKey !== key) setDragOverKey(key);
+  };
+
+  const handleCellDrop = (e: React.DragEvent, target: Date) => {
+    e.preventDefault();
+    const id = e.dataTransfer.getData('text/plain') || draggingId;
+    setDraggingId(null);
+    setDragOverKey(null);
+    if (!id) return;
+
+    const event = assistenze.find((a) => a.id === id);
+    if (!event) return;
+
+    // Conserva l'orario originale, cambia solo la data
+    const original = event.data ? new Date(event.data) : null;
+    const next = new Date(target);
+    if (original && !isNaN(original.getTime())) {
+      next.setHours(original.getHours(), original.getMinutes(), original.getSeconds(), original.getMilliseconds());
+    }
+    if (event.data && new Date(event.data).toDateString() === next.toDateString()) {
+      return; // stesso giorno
+    }
+
+    const newDateISO = next.toISOString();
+
+    // Optimistic update sulla cache calendario
+    queryClient.setQueryData<{ data: any[] } | undefined>(
+      ['assistenze-calendar', risorsaId],
+      (prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          data: prev.data.map((row: any) =>
+            row.phyo_assistenzeregistrazioniid === id ? { ...row, phyo_data: newDateISO } : row,
+          ),
+        };
+      },
+    );
+
+    // Optimistic update anche sulla cache della lista (e varianti paginate)
+    queryClient.setQueriesData<any>({ queryKey: ['assistenzeRegistrazioni'] }, (prev: any) => {
+      if (!prev) return prev;
+      const patchRow = (row: any) =>
+        row?.phyo_assistenzeregistrazioniid === id ? { ...row, phyo_data: newDateISO } : row;
+      if (Array.isArray(prev?.data)) {
+        return { ...prev, data: prev.data.map(patchRow) };
+      }
+      if (Array.isArray(prev?.pages)) {
+        return {
+          ...prev,
+          pages: prev.pages.map((p: any) => ({ ...p, data: (p.data || []).map(patchRow) })),
+        };
+      }
+      return prev;
+    });
+
+    moveMutation.mutate({ id, newDateISO });
+  };
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+    <div className="space-y-4 sm:space-y-6">
+      <div className="flex flex-col gap-2 sm:gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="text-sm uppercase tracking-[0.24em] text-default-400">Home / Calendario</p>
-          <h1 className="text-3xl font-semibold text-slate-900">{currentMonthLabel}</h1>
-          <p className="mt-2 text-sm text-default-500">
+          <p className="hidden sm:block text-sm uppercase tracking-[0.24em] text-default-400">Home / Calendario</p>
+          <h1 className="text-xl sm:text-3xl font-semibold text-slate-900 capitalize">{currentMonthLabel}</h1>
+          <p className="hidden sm:block mt-2 text-sm text-default-500">
             Visualizza gli appuntamenti e apri una registrazione direttamente dal calendario.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
           <Button
             variant="flat"
             size="sm"
@@ -185,9 +277,9 @@ export default function CalendarPage({ risorsaId, onOpen, onCreateNew }: Calenda
         </div>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
+      <div className="grid gap-3 sm:gap-6 xl:grid-cols-[1fr_340px]">
         <Card shadow="sm" className="bg-[#FAFBFC] border border-centoraggi-accent/20">
-          <CardBody className="space-y-4 p-4">
+          <CardBody className="space-y-3 sm:space-y-4 p-2 sm:p-4">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-semibold text-slate-900">{viewMode === 'week' ? currentWeekLabel : currentMonthLabel}</p>
@@ -241,30 +333,152 @@ export default function CalendarPage({ risorsaId, onOpen, onCreateNew }: Calenda
                       ))
                     )}
                   </div>
+                ) : viewMode === 'week' ? (
+                  <>
+                    {/* Mobile: lista giorni verticale */}
+                    <div className="sm:hidden space-y-2">
+                      {gridDates.map((date) => {
+                        const key = formatDayKey(date);
+                        const events = eventsByDate.get(key) ?? [];
+                        const isToday = key === formatDayKey(new Date());
+                        const isSelected = key === formatDayKey(selectedDate);
+                        const isDropTarget = dragOverKey === key;
+                        const dayLabel = DAYS[(date.getDay() + 6) % 7];
+                        return (
+                          <div
+                            key={key}
+                            onDragOver={(e) => handleCellDragOver(e, key)}
+                            onDragLeave={() => { if (dragOverKey === key) setDragOverKey(null); }}
+                            onDrop={(e) => handleCellDrop(e, date)}
+                            className={`rounded-xl border ${isDropTarget ? 'border-emerald-500 ring-2 ring-emerald-300 bg-emerald-50' : isSelected ? 'border-centoraggi-primary' : isToday ? 'border-primary-300 bg-primary-50/40' : 'border-default-200 bg-white'} p-2`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => setSelectedDate(date)}
+                              className="flex items-center justify-between w-full mb-1.5"
+                            >
+                              <span className={`text-xs font-semibold uppercase tracking-wider ${isToday ? 'text-primary-700' : 'text-slate-700'}`}>
+                                {dayLabel} {date.getDate()}
+                              </span>
+                              <span className={`text-[10px] rounded-full px-2 py-0.5 ${events.length > 0 ? 'bg-emerald-500 text-white' : 'bg-default-100 text-default-500'}`}>
+                                {events.length}
+                              </span>
+                            </button>
+                            {events.length === 0 ? (
+                              <p className="text-[11px] text-default-400 italic px-1">Nessun appuntamento</p>
+                            ) : (
+                              <div className="space-y-1">
+                                {events.map((event) => (
+                                  <div
+                                    key={event.id}
+                                    role="button"
+                                    tabIndex={0}
+                                    draggable
+                                    onDragStart={(e) => { e.stopPropagation(); handleEventDragStart(e, event); }}
+                                    onDragEnd={handleEventDragEnd}
+                                    onClick={(e) => { e.stopPropagation(); onOpen(event); }}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); onOpen(event); } }}
+                                    className={`rounded-lg bg-emerald-500/15 px-2 py-1.5 text-[11px] text-emerald-900 cursor-grab active:cursor-grabbing hover:bg-emerald-500/25 ${draggingId === event.id ? 'opacity-50' : ''}`}
+                                  >
+                                    <p className="truncate font-semibold">{event.nr || event.rifAssistenzaNome || 'Assistenza'}</p>
+                                    <p className="truncate text-default-600">{event.clienteNome || event.tipologiaAssistenza || '—'}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {/* Desktop: griglia settimana */}
+                    <div className="hidden sm:grid gap-1.5 sm:gap-2">
+                      <div className="grid grid-cols-7 gap-1 sm:gap-2 text-center text-[10px] sm:text-[11px] uppercase tracking-[0.12em] sm:tracking-[0.18em] text-default-400">
+                        {DAYS.map((day) => (
+                          <div key={day}>{day}</div>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-7 gap-1 sm:gap-2">
+                        {gridDates.map((date) => {
+                          const key = formatDayKey(date);
+                          const events = eventsByDate.get(key) ?? [];
+                          const isSelected = formatDayKey(date) === formatDayKey(selectedDate);
+                          const isToday = formatDayKey(date) === formatDayKey(new Date());
+                          const cellBg = isToday ? 'bg-primary-100' : 'bg-white';
+                          const dayNumberColor = isToday ? 'text-primary-700' : 'text-slate-900';
+                          const isDropTarget = dragOverKey === key;
+                          return (
+                            <button
+                              key={key}
+                              type="button"
+                              onClick={() => setSelectedDate(date)}
+                              onDragOver={(e) => handleCellDragOver(e, key)}
+                              onDragLeave={() => { if (dragOverKey === key) setDragOverKey(null); }}
+                              onDrop={(e) => handleCellDrop(e, date)}
+                              className={`relative min-h-[280px] rounded-3xl border ${isDropTarget ? 'border-emerald-500 ring-2 ring-emerald-300 bg-emerald-50' : isSelected ? 'border-centoraggi-primary' : isToday ? 'border-primary-300' : 'border-default-200'} ${isDropTarget ? '' : cellBg} p-3 pt-8 text-left transition hover:border-centoraggi-accent/40 ${isSelected ? 'shadow-sm' : ''}`}
+                            >
+                              <span className={`absolute top-2 left-3 text-sm font-semibold ${dayNumberColor}`}>{date.getDate()}</span>
+                              {events.length > 0 && <span className="absolute top-2 right-3 rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] text-white">{events.length}</span>}
+                              <div className="mt-3 space-y-2">
+                                {events.slice(0, 6).map((event) => (
+                                  <div
+                                    key={event.id}
+                                    role="button"
+                                    tabIndex={0}
+                                    draggable
+                                    onDragStart={(e) => { e.stopPropagation(); handleEventDragStart(e, event); }}
+                                    onDragEnd={handleEventDragEnd}
+                                    onClick={(e) => { e.stopPropagation(); onOpen(event); }}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); onOpen(event); } }}
+                                    className={`overflow-hidden rounded-2xl bg-emerald-500/15 p-2 text-[11px] text-emerald-900 cursor-grab active:cursor-grabbing hover:bg-emerald-500/25 ${draggingId === event.id ? 'opacity-50' : ''}`}
+                                  >
+                                    <p className="truncate font-semibold">{event.nr || event.rifAssistenzaNome || 'Assistenza'}</p>
+                                    <p className="truncate text-default-500">{event.clienteNome || event.tipologiaAssistenza || 'Nessuna descrizione'}</p>
+                                    {event.nr && event.rifAssistenzaNome && (
+                                      <p className="truncate text-[10px] text-default-400">Rif. {event.rifAssistenzaNome}</p>
+                                    )}
+                                    {event.tipologiaAssistenza && (
+                                      <p className="truncate text-[10px] text-default-400">{event.tipologiaAssistenza}</p>
+                                    )}
+                                  </div>
+                                ))}
+                                {events.length > 6 && (
+                                  <div className="text-[11px] text-default-500">+{events.length - 6}</div>
+                                )}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </>
                 ) : (
-                  <div className="grid gap-2">
-                    <div className="grid grid-cols-7 gap-2 text-center text-[11px] uppercase tracking-[0.18em] text-default-400">
+                  <div className="grid gap-1.5 sm:gap-2">
+                    <div className="grid grid-cols-7 gap-1 sm:gap-2 text-center text-[10px] sm:text-[11px] uppercase tracking-[0.12em] sm:tracking-[0.18em] text-default-400">
                       {DAYS.map((day) => (
                         <div key={day}>{day}</div>
                       ))}
                     </div>
-                    <div className="grid grid-cols-7 gap-2">
+                    <div className="grid grid-cols-7 gap-1 sm:gap-2">
                       {gridDates.map((date) => {
                         const key = formatDayKey(date);
                         const events = eventsByDate.get(key) ?? [];
                         const isCurrentMonth = viewMode === 'week' ? true : date.getMonth() === selectedDate.getMonth();
                         const isSelected = formatDayKey(date) === formatDayKey(selectedDate);
                         const isToday = formatDayKey(date) === formatDayKey(new Date());
-                        const cellHeight = viewMode === 'week' ? 'min-h-[280px]' : 'min-h-[120px]';
+                        const cellHeight = viewMode === 'week' ? 'min-h-[200px] sm:min-h-[280px]' : 'min-h-[64px] sm:min-h-[120px]';
                         const maxEvents = viewMode === 'week' ? 6 : 2;
                         const cellBg = isToday ? 'bg-primary-100' : isCurrentMonth ? 'bg-white' : 'bg-slate-50';
                         const dayNumberColor = isToday ? 'text-primary-700' : isCurrentMonth ? 'text-slate-900' : 'text-default-400';
+                        const isDropTarget = dragOverKey === key;
                         return (
                           <button
                             key={key}
                             type="button"
                             onClick={() => setSelectedDate(date)}
-                            className={`relative ${cellHeight} rounded-3xl border ${isSelected ? 'border-centoraggi-primary' : isToday ? 'border-primary-300' : 'border-default-200'} ${cellBg} p-3 ${viewMode === 'week' ? 'pt-8' : ''} text-left transition hover:border-centoraggi-accent/40 ${isSelected ? 'shadow-sm' : ''}`}
+                            onDragOver={(e) => handleCellDragOver(e, key)}
+                            onDragLeave={() => { if (dragOverKey === key) setDragOverKey(null); }}
+                            onDrop={(e) => handleCellDrop(e, date)}
+                            className={`relative ${cellHeight} rounded-xl sm:rounded-3xl border ${isDropTarget ? 'border-emerald-500 ring-2 ring-emerald-300 bg-emerald-50' : isSelected ? 'border-centoraggi-primary' : isToday ? 'border-primary-300' : 'border-default-200'} ${isDropTarget ? '' : cellBg} p-1.5 sm:p-3 ${viewMode === 'week' ? 'pt-6 sm:pt-8' : ''} text-left transition hover:border-centoraggi-accent/40 ${isSelected ? 'shadow-sm' : ''}`}
                           >
                             {viewMode === 'week' ? (
                               <>
@@ -277,28 +491,31 @@ export default function CalendarPage({ risorsaId, onOpen, onCreateNew }: Calenda
                                 {events.length > 0 && <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] text-white">{events.length}</span>}
                               </div>
                             )}
-                            <div className="mt-3 space-y-2">
+                            <div className="mt-1 sm:mt-3 space-y-1 sm:space-y-2">
                               {events.slice(0, maxEvents).map((event) => (
                                 <div
                                   key={event.id}
                                   role="button"
                                   tabIndex={0}
+                                  draggable
+                                  onDragStart={(e) => { e.stopPropagation(); handleEventDragStart(e, event); }}
+                                  onDragEnd={handleEventDragEnd}
                                   onClick={(e) => { e.stopPropagation(); onOpen(event); }}
                                   onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); onOpen(event); } }}
-                                  className="overflow-hidden rounded-2xl bg-emerald-500/15 p-2 text-[11px] text-emerald-900 cursor-pointer hover:bg-emerald-500/25"
+                                  className={`overflow-hidden rounded-md sm:rounded-2xl bg-emerald-500/15 px-1 py-0.5 sm:p-2 text-[10px] sm:text-[11px] text-emerald-900 cursor-grab active:cursor-grabbing hover:bg-emerald-500/25 ${draggingId === event.id ? 'opacity-50' : ''}`}
                                 >
                                   <p className="truncate font-semibold">{event.nr || event.rifAssistenzaNome || 'Assistenza'}</p>
-                                  <p className="truncate text-default-500">{event.clienteNome || event.tipologiaAssistenza || 'Nessuna descrizione'}</p>
+                                  <p className="hidden sm:block truncate text-default-500">{event.clienteNome || event.tipologiaAssistenza || 'Nessuna descrizione'}</p>
                                   {event.nr && event.rifAssistenzaNome && (
-                                    <p className="truncate text-[10px] text-default-400">Rif. {event.rifAssistenzaNome}</p>
+                                    <p className="hidden sm:block truncate text-[10px] text-default-400">Rif. {event.rifAssistenzaNome}</p>
                                   )}
                                   {event.tipologiaAssistenza && (
-                                    <p className="truncate text-[10px] text-default-400">{event.tipologiaAssistenza}</p>
+                                    <p className="hidden sm:block truncate text-[10px] text-default-400">{event.tipologiaAssistenza}</p>
                                   )}
                                 </div>
                               ))}
                               {events.length > maxEvents && (
-                                <div className="text-[11px] text-default-500">+{events.length - maxEvents} altri</div>
+                                <div className="text-[10px] sm:text-[11px] text-default-500">+{events.length - maxEvents}</div>
                               )}
                             </div>
                           </button>

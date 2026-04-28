@@ -132,11 +132,12 @@ function AppContent() {
           <span className="text-base sm:text-lg font-semibold text-white">Gestione Assistenze</span>
         </div>
         <NavbarContent justify="end" className="gap-1 sm:gap-2">
+          {/* Pulsanti Calendario/Elenco: visibili solo da sm in su; su mobile sono nella barra sotto */}
           <Button
             size="sm"
             variant={view.type === 'calendar' ? 'solid' : 'flat'}
             color={view.type === 'calendar' ? 'primary' : undefined}
-            className="min-w-[88px]"
+            className="hidden sm:inline-flex min-w-[88px]"
             onPress={handleShowCalendar}
           >
             Calendario
@@ -145,7 +146,7 @@ function AppContent() {
             size="sm"
             variant={view.type === 'list' ? 'solid' : 'flat'}
             color={view.type === 'list' ? 'primary' : undefined}
-            className="min-w-[88px]"
+            className="hidden sm:inline-flex min-w-[88px]"
             onPress={handleShowList}
           >
             Elenco
@@ -160,7 +161,31 @@ function AppContent() {
         </NavbarContent>
       </Navbar>
 
-      <main className="w-full max-w-none px-2 sm:px-4 lg:px-6 py-4 sm:py-8">
+      {/* Barra navigazione mobile sotto al logo */}
+      <div className="sm:hidden sticky top-[4.5rem] z-30 bg-[#38373B]/95 backdrop-blur-md border-b border-white/10 px-2 py-2 flex gap-2">
+        <Button
+          size="sm"
+          fullWidth
+          variant={view.type === 'calendar' ? 'solid' : 'flat'}
+          color={view.type === 'calendar' ? 'primary' : undefined}
+          className={view.type === 'calendar' ? '' : 'bg-white/15 text-white'}
+          onPress={handleShowCalendar}
+        >
+          Calendario
+        </Button>
+        <Button
+          size="sm"
+          fullWidth
+          variant={view.type === 'list' ? 'solid' : 'flat'}
+          color={view.type === 'list' ? 'primary' : undefined}
+          className={view.type === 'list' ? '' : 'bg-white/15 text-white'}
+          onPress={handleShowList}
+        >
+          Elenco
+        </Button>
+      </div>
+
+      <main className="w-full max-w-none px-2 sm:px-4 lg:px-6 py-3 sm:py-8">
         <ActiveTimersPanel onOpenAssistenza={handleOpenById} />
         <AnimatePresence mode="wait" initial={false}>
           {view.type === 'edit' ? (
