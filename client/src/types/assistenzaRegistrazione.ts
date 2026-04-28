@@ -13,12 +13,17 @@ export interface AssistenzaRegistrazioneRaw {
   phyo_costoorario: number | null;
   phyo_totale: number | null;
   phyo_materialeutilizzato: string | null;
-  phyo_tipologia_assistenza?: string | number | null;
   _phyo_rifassistenza_value: string | null;
   _phyo_risorsa_value: string | null;
-  _phyo_cliente_value: string | null;
-  phyo_RifAssistenza?: { phyo_indirizzoassistenza?: string | null } | null;
-  phyo_rifassistenza?: { phyo_indirizzoassistenza?: string | null } | null;
+  // Tipologia e Cliente arrivano dalla rif. assistenza espansa (non esistono sulla registrazione)
+  phyo_Rifassistenza?: {
+    phyo_indirizzoassistenza?: string | null;
+    phyo_tipologia_assistenza?: string | number | null;
+    _phyo_cliente_value?: string | null;
+    [key: `${string}@OData.Community.Display.V1.FormattedValue`]: string;
+  } | null;
+  phyo_RifAssistenza?: AssistenzaRegistrazioneRaw['phyo_Rifassistenza'];
+  phyo_rifassistenza?: AssistenzaRegistrazioneRaw['phyo_Rifassistenza'];
   statecode: number;
   [key: `${string}@OData.Community.Display.V1.FormattedValue`]: string;
 }
@@ -50,6 +55,7 @@ export interface AssistenzaRegistrazione {
 }
 
 export function mapAssistenzaRegistrazione(raw: AssistenzaRegistrazioneRaw): AssistenzaRegistrazione {
+  const rif = raw.phyo_Rifassistenza ?? raw.phyo_RifAssistenza ?? raw.phyo_rifassistenza ?? null;
   return {
     id: raw.phyo_assistenzeregistrazioniid,
     nr: raw.phyo_nr ?? '',
@@ -68,21 +74,18 @@ export function mapAssistenzaRegistrazione(raw: AssistenzaRegistrazioneRaw): Ass
     totale: raw.phyo_totale,
     materialeUtilizzato: raw.phyo_materialeutilizzato ?? '',
     tipologiaAssistenza:
-      raw['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue'] ??
-      (raw.phyo_tipologia_assistenza != null ? String(raw.phyo_tipologia_assistenza) : ''),
+      rif?.['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue'] ??
+      (rif?.phyo_tipologia_assistenza != null ? String(rif.phyo_tipologia_assistenza) : ''),
     rifAssistenzaId: raw._phyo_rifassistenza_value,
     rifAssistenzaNome:
       raw['_phyo_rifassistenza_value@OData.Community.Display.V1.FormattedValue'] ?? '',
-    indirizzoAssistenza:
-      raw.phyo_RifAssistenza?.phyo_indirizzoassistenza ??
-      raw.phyo_rifassistenza?.phyo_indirizzoassistenza ??
-      '',
+    indirizzoAssistenza: rif?.phyo_indirizzoassistenza ?? '',
     risorsaId: raw._phyo_risorsa_value,
     risorsaNome:
       raw['_phyo_risorsa_value@OData.Community.Display.V1.FormattedValue'] ?? '',
-    clienteId: raw._phyo_cliente_value,
+    clienteId: rif?._phyo_cliente_value ?? null,
     clienteNome:
-      raw['_phyo_cliente_value@OData.Community.Display.V1.FormattedValue'] ?? '',
+      rif?.['_phyo_cliente_value@OData.Community.Display.V1.FormattedValue'] ?? '',
     attivo: raw.statecode === 0,
   };
 }

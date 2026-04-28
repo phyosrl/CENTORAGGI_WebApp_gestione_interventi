@@ -50,13 +50,12 @@ export async function dataverseAssistenze(request: HttpRequest): Promise<HttpRes
       },
     };
   } catch (error: any) {
-    const dvDetail = error?.response?.data?.error?.message || error?.response?.data || error?.message;
-    console.error('Dataverse error:', dvDetail);
+    console.error('Dataverse error:', error?.message || error);
     return {
       status: 500,
       jsonBody: {
         error: 'Failed to fetch assistenze',
-        message: typeof dvDetail === 'string' ? dvDetail : JSON.stringify(dvDetail),
+        message: process.env.NODE_ENV === 'development' ? error?.message : undefined,
       },
     };
   }
@@ -111,7 +110,7 @@ export async function updateAssistenza(request: HttpRequest): Promise<HttpRespon
       // Dataverse non accetta @odata.bind=null su PATCH; per dissociare serve un DELETE
       // sulla navigation property. Omettiamo la binding se il valore è null.
       if (rifId) {
-        sanitized['phyo_Rifassistenza@odata.bind'] = `/phyo_assistenzes(${rifId})`;
+        sanitized['phyo_RifAssistenza@odata.bind'] = `/phyo_assistenzes(${rifId})`;
       }
     }
 
@@ -174,7 +173,7 @@ export async function createAssistenza(request: HttpRequest): Promise<HttpRespon
     if (sanitized._phyo_rifassistenza_value) {
       const rifId = sanitized._phyo_rifassistenza_value as string;
       delete sanitized._phyo_rifassistenza_value;
-      sanitized['phyo_Rifassistenza@odata.bind'] = `/phyo_assistenzes(${rifId})`;
+      sanitized['phyo_RifAssistenza@odata.bind'] = `/phyo_assistenzes(${rifId})`;
     } else {
       delete sanitized._phyo_rifassistenza_value;
     }
@@ -196,18 +195,12 @@ export async function createAssistenza(request: HttpRequest): Promise<HttpRespon
       jsonBody: { success: true, id },
     };
   } catch (error: any) {
-    const dvError = error?.response?.data?.error;
-    const detail =
-      (typeof dvError?.message === 'string' && dvError.message) ||
-      (typeof error?.response?.data === 'string' && error.response.data) ||
-      error?.message ||
-      'Errore sconosciuto';
     console.error('Create error:', error?.response?.data || error?.message || error);
     return {
       status: 500,
       jsonBody: {
         error: 'Creazione fallita',
-        message: detail,
+        message: process.env.NODE_ENV === 'development' ? (error?.response?.data || error?.message) : undefined,
       },
     };
   }

@@ -218,7 +218,7 @@ export class DataverseService {
       ? `_phyo_risorsa_value eq ${this.sanitizeGuid(risorsaId)}`
       : undefined;
 
-    return this.query('phyo_assistenzeregistrazionis', filter, this.assistenzeSelect, undefined, 'phyo_Rifassistenza($select=phyo_indirizzoassistenza)');
+    return this.query('phyo_assistenzeregistrazionis', filter, this.assistenzeSelect, undefined, 'phyo_rifassistenza($select=phyo_indirizzoassistenza)');
   }
 
   async getAssistenzePaged(risorsaId?: string, pageSize?: number, skipToken?: string): Promise<{ data: any[]; totalCount: number; skipToken: string | null }> {
@@ -232,7 +232,7 @@ export class DataverseService {
       orderby: 'phyo_nr desc',
       pageSize,
       skipToken,
-      expand: 'phyo_Rifassistenza($select=phyo_indirizzoassistenza)',
+      expand: 'phyo_rifassistenza($select=phyo_indirizzoassistenza)',
     });
   }
 

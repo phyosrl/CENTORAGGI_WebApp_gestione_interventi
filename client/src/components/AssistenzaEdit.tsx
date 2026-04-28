@@ -573,32 +573,9 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
     const manual = opts?.manual ?? false;
 
     if (isCreate) {
-      // Validazione campi obbligatori per creazione registrazione
-      const missing: string[] = [];
-      if (!clienteId) missing.push('Cliente');
-      if (!tipologia) missing.push('Tipologia');
-      if (!data) missing.push('Data');
-      if (missing.length > 0) {
-        addToast({
-          title: 'Campi obbligatori mancanti',
-          description: `Compila: ${missing.join(', ')}`,
-          color: 'warning',
-        });
-        return;
-      }
-
       try {
-        const basePayload = buildBasePayload();
-        if (basePayload.phyo_tipologia_assistenza == null) {
-          addToast({
-            title: 'Tipologia non valida',
-            description: 'Impossibile risolvere il valore della tipologia. Riprova ricaricando la pagina.',
-            color: 'warning',
-          });
-          return;
-        }
         const result = await createMutation.mutateAsync({
-          ...basePayload,
+          ...buildBasePayload(),
           phyo_data: data || null,
           _phyo_risorsa_value: props.risorsaId!,
         });
@@ -621,17 +598,9 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
         });
         onBack();
       } catch (err: any) {
-        const serverData = err?.response?.data;
-        const detail =
-          (typeof serverData?.message === 'string' && serverData.message) ||
-          (typeof serverData?.message?.message === 'string' && serverData.message.message) ||
-          (typeof serverData?.error === 'string' && serverData.error) ||
-          err?.message ||
-          'Creazione fallita';
-        console.error('[createAssistenza] errore:', serverData ?? err);
         addToast({
-          title: 'Errore creazione',
-          description: detail,
+          title: 'Errore',
+          description: err?.response?.data?.error || 'Creazione fallita',
           color: 'danger',
         });
       }
@@ -775,7 +744,6 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
               label="Cliente"
               placeholder="Cerca cliente per nome..."
               variant="bordered"
-              isRequired={isCreate}
               selectedKey={clienteId || null}
               isDisabled={lockCliente}
               onSelectionChange={(key) => {
@@ -804,7 +772,6 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
               label="Tipologia"
               placeholder="Seleziona tipologia..."
               variant="bordered"
-              isRequired={isCreate}
               selectedKeys={tipologia ? [tipologia] : []}
               isDisabled={lockTipologia}
               onSelectionChange={(keys) => {
@@ -921,7 +888,6 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
                 value={data}
                 onValueChange={setData}
                 variant="bordered"
-                isRequired={isCreate}
                 type="date"
                 classNames={{ inputWrapper: 'bg-[#FAFBFC]' }}
               />
@@ -1233,34 +1199,18 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
         </CardBody>
       </Card>
 
-      {/* Floating Save (Crea) + back-to-top — il Save sta a sinistra della freccia */}
-      <div
-        className="fixed bottom-5 right-24 md:right-5 z-50 flex items-center gap-2 pointer-events-none"
-        style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 1.25rem)' }}
+      {/* Floating back-to-top */}
+      <Button
+        isIconOnly
+        size="lg"
+        radius="full"
+        color="primary"
+        aria-label="Torna all'inizio"
+        onPress={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+        className="fixed bottom-5 right-24 md:right-5 z-40 shadow-lg bg-centoraggi-primary"
       >
-        <Button
-          size="lg"
-          color="primary"
-          onPress={() => handleSave({ closeAfterSave: isCreate, manual: true })}
-          isLoading={isPending}
-          className="pointer-events-auto font-semibold bg-centoraggi-primary shadow-lg shadow-black/20"
-          startContent={!isPending ? <Save className="w-5 h-5" /> : undefined}
-          aria-label={isCreate ? 'Crea registrazione' : 'Salva registrazione'}
-        >
-          {isCreate ? 'Crea' : 'Salva'}
-        </Button>
-        <Button
-          isIconOnly
-          size="lg"
-          radius="full"
-          color="primary"
-          aria-label="Torna all'inizio"
-          onPress={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-          className="pointer-events-auto shadow-lg bg-centoraggi-primary"
-        >
-          <ArrowUp className="w-5 h-5" />
-        </Button>
-      </div>
+        <ArrowUp className="w-5 h-5" />
+      </Button>
 
       {/* Floating timer FAB on mobile */}
       <div className="md:hidden fixed bottom-5 right-5 z-50">
