@@ -238,19 +238,6 @@ export async function fetchTipologieAssistenza(): Promise<TipologiaAssistenzaOpt
   return data.data;
 }
 
-export interface RequiredField {
-  logicalName: string;
-  displayName: string;
-  requiredLevel: string;
-}
-
-export async function fetchRequiredFieldsAssistenza(): Promise<RequiredField[]> {
-  const { data } = await api.get<{ success: boolean; data: RequiredField[] }>(
-    '/dataverse/assistenze/required-fields'
-  );
-  return data.data;
-}
-
 // --- Image Annotations ---
 
 export interface Annotation {

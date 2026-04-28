@@ -17,6 +17,7 @@ export interface AssistenzaRegistrazioneRaw {
   _phyo_rifassistenza_value: string | null;
   _phyo_risorsa_value: string | null;
   _phyo_cliente_value: string | null;
+  phyo_RifAssistenza?: { phyo_indirizzoassistenza?: string | null } | null;
   phyo_rifassistenza?: { phyo_indirizzoassistenza?: string | null } | null;
   statecode: number;
   [key: `${string}@OData.Community.Display.V1.FormattedValue`]: string;
@@ -72,7 +73,10 @@ export function mapAssistenzaRegistrazione(raw: AssistenzaRegistrazioneRaw): Ass
     rifAssistenzaId: raw._phyo_rifassistenza_value,
     rifAssistenzaNome:
       raw['_phyo_rifassistenza_value@OData.Community.Display.V1.FormattedValue'] ?? '',
-    indirizzoAssistenza: raw.phyo_rifassistenza?.phyo_indirizzoassistenza ?? '',
+    indirizzoAssistenza:
+      raw.phyo_RifAssistenza?.phyo_indirizzoassistenza ??
+      raw.phyo_rifassistenza?.phyo_indirizzoassistenza ??
+      '',
     risorsaId: raw._phyo_risorsa_value,
     risorsaNome:
       raw['_phyo_risorsa_value@OData.Community.Display.V1.FormattedValue'] ?? '',

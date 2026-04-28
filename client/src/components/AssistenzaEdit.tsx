@@ -28,7 +28,7 @@ import {
   addToast,
 } from '@heroui/react';
 import { AssistenzaRegistrazione } from '../types/assistenzaRegistrazione';
-import { updateAssistenza, UpdateAssistenzaPayload, createAssistenza, CreateAssistenzaPayload, fetchAccounts, fetchRifAssistenze, fetchTipologieAssistenza, fetchRequiredFieldsAssistenza, fetchImages, uploadImage, deleteImage, Annotation, geocodeAddress, GeocodeResult } from '../services/api';
+import { updateAssistenza, UpdateAssistenzaPayload, createAssistenza, CreateAssistenzaPayload, fetchAccounts, fetchRifAssistenze, fetchTipologieAssistenza, fetchImages, uploadImage, deleteImage, Annotation, geocodeAddress, GeocodeResult } from '../services/api';
 import { getActiveTimer, removeActiveTimer, upsertActiveTimer } from '../services/timerStore';
 import AssistenzaImagesSection from './assistenza/AssistenzaImagesSection';
 import SignatureWidget, { SIGNATURE_SUBJECT } from './assistenza/SignatureWidget';
@@ -291,12 +291,6 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
   const { data: tipologieOptions } = useQuery({
     queryKey: ['tipologieAssistenza'],
     queryFn: fetchTipologieAssistenza,
-    staleTime: 60 * 60 * 1000,
-  });
-
-  const { data: requiredFields } = useQuery({
-    queryKey: ['requiredFieldsAssistenza'],
-    queryFn: fetchRequiredFieldsAssistenza,
     staleTime: 60 * 60 * 1000,
   });
 
@@ -574,62 +568,20 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
     };
   }, [isCreate, updatePayloadSignature, buildUpdatePayload, updateMutation, queryClient]);
 
-  /**
-   * Mappa i logicalName Dataverse -> { label, isFilled } per i soli campi gestiti
-   * dal form di registrazione. I campi obbligatori che NON appaiono qui (es. ownerid,
-   * statecode, statuscode, phyo_nr — generato lato server, phyo_risorsa — auto dal token)
-   * vengono ignorati perché compilati automaticamente dal backend.
-   */
-  const formFieldByLogicalName = useMemo<Record<string, { label: string; isFilled: () => boolean }>>(() => ({
-    phyo_attne: { label: 'Att.ne', isFilled: () => attne.trim() !== '' },
-    phyo_oreintervento: { label: 'Ore intervento', isFilled: () => oreIntervento.trim() !== '' },
-    phyo_ore: { label: 'Ore', isFilled: () => ore.trim() !== '' },
-    phyo_descrizioneintervento: { label: 'Descrizione intervento', isFilled: () => descrizione.trim() !== '' },
-    phyo_materialeutilizzato: { label: 'Materiale utilizzato', isFilled: () => materiale.trim() !== '' },
-    phyo_note: { label: 'Note', isFilled: () => note.trim() !== '' },
-    phyo_costoorario: { label: 'Costo orario', isFilled: () => costoOrario.trim() !== '' },
-    phyo_totale: { label: 'Totale', isFilled: () => totale.trim() !== '' },
-    phyo_data: { label: 'Data', isFilled: () => !!data },
-    phyo_tipologia_assistenza: { label: 'Tipologia', isFilled: () => !!tipologia },
-    _phyo_cliente_value: { label: 'Cliente', isFilled: () => !!clienteId },
-    phyo_cliente: { label: 'Cliente', isFilled: () => !!clienteId },
-    _phyo_rifassistenza_value: { label: 'Rif. Assistenza', isFilled: () => !!rifAssistenzaId },
-    phyo_rifassistenza: { label: 'Rif. Assistenza', isFilled: () => !!rifAssistenzaId },
-  }), [attne, oreIntervento, ore, descrizione, materiale, note, costoOrario, totale, data, tipologia, clienteId, rifAssistenzaId]);
-
-  /**
-   * Set di logicalName Dataverse marcati come obbligatori e gestiti nel form,
-   * derivati dalla metadata EntityDefinitions di phyo_assistenzeregistrazioni.
-   */
-  const requiredFormFields = useMemo(() => {
-    if (!requiredFields) return [] as Array<{ logicalName: string; label: string; isFilled: () => boolean }>;
-    return requiredFields
-      .map((f) => {
-        const mapped = formFieldByLogicalName[f.logicalName];
-        if (!mapped) return null;
-        return { logicalName: f.logicalName, label: mapped.label, isFilled: mapped.isFilled };
-      })
-      .filter((x): x is { logicalName: string; label: string; isFilled: () => boolean } => x !== null);
-  }, [requiredFields, formFieldByLogicalName]);
-
-  const isFieldRequired = useCallback(
-    (logicalName: string) => requiredFormFields.some((f) => f.logicalName === logicalName),
-    [requiredFormFields]
-  );
-
   const handleSave = async (opts?: { closeAfterSave?: boolean; manual?: boolean }) => {
     const closeAfterSave = opts?.closeAfterSave ?? false;
     const manual = opts?.manual ?? false;
 
     if (isCreate) {
-      // Validazione: usa SOLO i campi obbligatori dichiarati nella metadata Dataverse
-      const missing = requiredFormFields.filter((f) => !f.isFilled()).map((f) => f.label);
-      // dedup (cliente/rif compaiono con due logicalName)
-      const missingUnique = Array.from(new Set(missing));
-      if (missingUnique.length > 0) {
+      // Validazione campi obbligatori per creazione registrazione
+      const missing: string[] = [];
+      if (!clienteId) missing.push('Cliente');
+      if (!tipologia) missing.push('Tipologia');
+      if (!data) missing.push('Data');
+      if (missing.length > 0) {
         addToast({
           title: 'Campi obbligatori mancanti',
-          description: `Compila: ${missingUnique.join(', ')}`,
+          description: `Compila: ${missing.join(', ')}`,
           color: 'warning',
         });
         return;
@@ -637,7 +589,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
 
       try {
         const basePayload = buildBasePayload();
-        if (isFieldRequired('phyo_tipologia_assistenza') && basePayload.phyo_tipologia_assistenza == null) {
+        if (basePayload.phyo_tipologia_assistenza == null) {
           addToast({
             title: 'Tipologia non valida',
             description: 'Impossibile risolvere il valore della tipologia. Riprova ricaricando la pagina.',
@@ -823,7 +775,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
               label="Cliente"
               placeholder="Cerca cliente per nome..."
               variant="bordered"
-              isRequired={isCreate && (isFieldRequired('_phyo_cliente_value') || isFieldRequired('phyo_cliente'))}
+              isRequired={isCreate}
               selectedKey={clienteId || null}
               isDisabled={lockCliente}
               onSelectionChange={(key) => {
@@ -852,7 +804,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
               label="Tipologia"
               placeholder="Seleziona tipologia..."
               variant="bordered"
-              isRequired={isCreate && isFieldRequired('phyo_tipologia_assistenza')}
+              isRequired={isCreate}
               selectedKeys={tipologia ? [tipologia] : []}
               isDisabled={lockTipologia}
               onSelectionChange={(keys) => {
@@ -896,7 +848,6 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
               label="Rif. Assistenza"
               placeholder="Seleziona assistenza..."
               variant="bordered"
-              isRequired={isCreate && (isFieldRequired('_phyo_rifassistenza_value') || isFieldRequired('phyo_rifassistenza'))}
               selectedKeys={rifAssistenzaId ? [rifAssistenzaId] : []}
               isDisabled={lockRifAssistenza}
               onSelectionChange={(keys) => {
@@ -970,7 +921,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
                 value={data}
                 onValueChange={setData}
                 variant="bordered"
-                isRequired={isCreate && isFieldRequired('phyo_data')}
+                isRequired={isCreate}
                 type="date"
                 classNames={{ inputWrapper: 'bg-[#FAFBFC]' }}
               />

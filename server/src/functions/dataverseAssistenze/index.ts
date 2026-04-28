@@ -50,12 +50,13 @@ export async function dataverseAssistenze(request: HttpRequest): Promise<HttpRes
       },
     };
   } catch (error: any) {
-    console.error('Dataverse error:', error?.message || error);
+    const dvDetail = error?.response?.data?.error?.message || error?.response?.data || error?.message;
+    console.error('Dataverse error:', dvDetail);
     return {
       status: 500,
       jsonBody: {
         error: 'Failed to fetch assistenze',
-        message: process.env.NODE_ENV === 'development' ? error?.message : undefined,
+        message: typeof dvDetail === 'string' ? dvDetail : JSON.stringify(dvDetail),
       },
     };
   }
@@ -110,7 +111,7 @@ export async function updateAssistenza(request: HttpRequest): Promise<HttpRespon
       // Dataverse non accetta @odata.bind=null su PATCH; per dissociare serve un DELETE
       // sulla navigation property. Omettiamo la binding se il valore è null.
       if (rifId) {
-        sanitized['phyo_RifAssistenza@odata.bind'] = `/phyo_assistenzes(${rifId})`;
+        sanitized['phyo_Rifassistenza@odata.bind'] = `/phyo_assistenzes(${rifId})`;
       }
     }
 
@@ -173,7 +174,7 @@ export async function createAssistenza(request: HttpRequest): Promise<HttpRespon
     if (sanitized._phyo_rifassistenza_value) {
       const rifId = sanitized._phyo_rifassistenza_value as string;
       delete sanitized._phyo_rifassistenza_value;
-      sanitized['phyo_RifAssistenza@odata.bind'] = `/phyo_assistenzes(${rifId})`;
+      sanitized['phyo_Rifassistenza@odata.bind'] = `/phyo_assistenzes(${rifId})`;
     } else {
       delete sanitized._phyo_rifassistenza_value;
     }
@@ -285,34 +286,6 @@ app.http('getTipologiaAssistenzaOptions', {
   authLevel: 'anonymous',
   route: 'dataverse/tipologie-assistenza',
   handler: getTipologiaAssistenzaOptions,
-});
-
-export async function getRequiredFieldsAssistenza(
-  request: HttpRequest
-): Promise<HttpResponseInit> {
-  const auth = requireAuth(request);
-  if (auth.response) return auth.response;
-
-  try {
-    const items = await dataverseService.getRequiredAttributes('phyo_assistenzeregistrazioni');
-    return {
-      status: 200,
-      jsonBody: { success: true, data: items },
-    };
-  } catch (error: any) {
-    console.error('getRequiredFieldsAssistenza error:', error?.message || error);
-    return {
-      status: 500,
-      jsonBody: { error: 'Failed to fetch required fields' },
-    };
-  }
-}
-
-app.http('getRequiredFieldsAssistenza', {
-  methods: ['GET'],
-  authLevel: 'anonymous',
-  route: 'dataverse/assistenze/required-fields',
-  handler: getRequiredFieldsAssistenza,
 });
 
 export async function getAccounts(request: HttpRequest): Promise<HttpResponseInit> {
