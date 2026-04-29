@@ -1,7 +1,7 @@
 import React, { memo } from 'react';
 import { motion } from 'framer-motion';
 import { Card, CardBody } from '@heroui/react';
-import { MapPin } from 'lucide-react';
+import { MapPin, Clock } from 'lucide-react';
 import { fadeInUp } from './motion';
 import { AssistenzaRegistrazione } from '../types/assistenzaRegistrazione';
 
@@ -12,6 +12,15 @@ function formatDate(dateStr: string | null): string {
     month: 'short',
     year: 'numeric',
   });
+}
+
+function formatOre(value: number | null): string | null {
+  if (value == null || isNaN(value)) return null;
+  const total = Math.max(0, value);
+  const h = Math.floor(total);
+  const m = Math.round((total - h) * 60);
+  if (m === 60) return `${h + 1}:00`;
+  return `${h}:${String(m).padStart(2, '0')}`;
 }
 
 interface Props {
@@ -67,6 +76,11 @@ const AssistenzaMobileCardImpl: React.FC<Props> = ({ a, isRunning, statusChip, o
             <span className="tabular-nums">{formatDate(a.data)}</span>
             {a.clienteNome && <span className="truncate max-w-[60%]">{a.clienteNome}</span>}
             {a.tipologiaAssistenza && <span className="truncate max-w-[60%] text-default-500">{a.tipologiaAssistenza}</span>}
+            {formatOre(a.oreIntervento) && (
+              <span className="inline-flex items-center gap-0.5 tabular-nums text-default-700">
+                <Clock className="w-3 h-3" /> {formatOre(a.oreIntervento)}h
+              </span>
+            )}
           </div>
         </CardBody>
       </Card>

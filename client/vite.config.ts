@@ -95,12 +95,21 @@ export default defineConfig({
     }),
   ],
   server: {
+    // host: true => ascolta su 0.0.0.0 (tutte le interfacce) restando comunque
+    // raggiungibile via http://localhost:5173 e via http://<IP-LAN>:5173
+    host: true,
     port: 5173,
+    strictPort: true,
     proxy: {
       '/api': {
         target: 'http://localhost:7071',
         changeOrigin: true
       }
     }
+  },
+  preview: {
+    host: true,
+    port: 4173,
+    strictPort: true,
   }
 })

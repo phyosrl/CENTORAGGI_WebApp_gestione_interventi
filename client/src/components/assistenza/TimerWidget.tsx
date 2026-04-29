@@ -23,31 +23,64 @@ export default function TimerWidget({
   return (
     <div className="flex items-center gap-1 pb-1 shrink-0">
       <div
-        className={`font-mono text-xs tabular-nums rounded-md px-2 py-1 text-center whitespace-nowrap ${
-          timerRunning ? 'bg-success-100 text-success-700' : 'bg-default-100 text-default-700'
+        className={`font-mono text-xs tabular-nums rounded-md px-2 py-1 text-center whitespace-nowrap transition-colors ${
+          timerRunning
+            ? 'bg-success-100 text-success-700 ring-2 ring-success-400 animate-pulse'
+            : timerSeconds > 0
+              ? 'bg-warning-100 text-warning-700'
+              : 'bg-default-100 text-default-500'
         }`}
       >
         {timerDisplay}
       </div>
       {!timerRunning ? (
-        <Button size="sm" isIconOnly color="success" variant="flat" onPress={onStart} aria-label="Avvia timer">
+        <Button
+          size="sm"
+          isIconOnly
+          color="success"
+          variant="solid"
+          onPress={onStart}
+          aria-label="Avvia timer"
+          className="shadow-md ring-1 ring-success-300"
+        >
           <Play className="w-4 h-4" />
         </Button>
       ) : (
-        <Button size="sm" isIconOnly color="danger" variant="flat" onPress={onPause} aria-label="Pausa timer">
+        <Button
+          size="sm"
+          isIconOnly
+          color="danger"
+          variant="solid"
+          onPress={onPause}
+          aria-label="Pausa timer"
+          className="shadow-md ring-2 ring-danger-300 animate-pulse"
+        >
           <Pause className="w-4 h-4" />
         </Button>
       )}
-      {timerSeconds > 0 && (
-        <>
-          <Button size="sm" isIconOnly color="primary" variant="flat" onPress={onApply} aria-label="Applica ore">
-            <Check className="w-4 h-4" />
-          </Button>
-          <Button size="sm" isIconOnly variant="flat" onPress={onReset} aria-label="Reset timer">
-            <RotateCcw className="w-4 h-4" />
-          </Button>
-        </>
-      )}
+      <Button
+        size="sm"
+        isIconOnly
+        color="primary"
+        variant={timerSeconds > 0 ? 'solid' : 'flat'}
+        isDisabled={timerSeconds === 0}
+        onPress={onApply}
+        aria-label="Applica ore"
+        className={timerSeconds > 0 ? 'shadow-md' : 'opacity-40'}
+      >
+        <Check className="w-4 h-4" />
+      </Button>
+      <Button
+        size="sm"
+        isIconOnly
+        variant="flat"
+        isDisabled={timerSeconds === 0}
+        onPress={onReset}
+        aria-label="Reset timer"
+        className={timerSeconds > 0 ? '' : 'opacity-40'}
+      >
+        <RotateCcw className="w-4 h-4" />
+      </Button>
     </div>
   );
 }

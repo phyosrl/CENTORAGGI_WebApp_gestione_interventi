@@ -28,10 +28,10 @@ import {
   addToast,
 } from '@heroui/react';
 import { AssistenzaRegistrazione } from '../types/assistenzaRegistrazione';
-import { updateAssistenza, UpdateAssistenzaPayload, createAssistenza, CreateAssistenzaPayload, fetchAccounts, fetchRifAssistenze, fetchTipologieAssistenza, fetchImages, uploadImage, deleteImage, Annotation, geocodeAddress, GeocodeResult } from '../services/api';
+import { updateAssistenza, UpdateAssistenzaPayload, createAssistenza, CreateAssistenzaPayload, fetchAccounts, fetchRifAssistenze, fetchTipologieAssistenza, fetchSharepointFiles, uploadSharepointFile, deleteSharepointFile, geocodeAddress, GeocodeResult } from '../services/api';
 import { getActiveTimer, removeActiveTimer, upsertActiveTimer } from '../services/timerStore';
 import AssistenzaImagesSection from './assistenza/AssistenzaImagesSection';
-import SignatureWidget, { SIGNATURE_SUBJECT } from './assistenza/SignatureWidget';
+import SignatureWidget, { SIGNATURE_FILENAME } from './assistenza/SignatureWidget';
 
 type NominatimResult = GeocodeResult;
 
@@ -240,6 +240,29 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
     setOreIntervento(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`);
   }, [dataOraInizio, dataOraFine]);
 
+  // Quando l'utente modifica manualmente le Ore Intervento e c'è una data/ora
+  // di inizio, aggiorna automaticamente la data/ora fine = inizio + ore.
+  // Wrapper sostitutivo di setOreIntervento usato negli input/azioni utente.
+  const updateOreIntervento = useCallback((value: string) => {
+    setOreIntervento(value);
+    if (!dataOraInizio) return;
+    const m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(value.trim());
+    if (!m) return;
+    const h = parseInt(m[1], 10);
+    const mm = parseInt(m[2], 10);
+    const ss = m[3] ? parseInt(m[3], 10) : 0;
+    if (isNaN(h) || isNaN(mm) || isNaN(ss)) return;
+    const totalSec = h * 3600 + mm * 60 + ss;
+    if (totalSec <= 0) return;
+    const inizioMs = new Date(dataOraInizio).getTime();
+    if (isNaN(inizioMs)) return;
+    const fineDate = new Date(inizioMs + totalSec * 1000);
+    // Format come stringa locale "YYYY-MM-DDTHH:MM" per coerenza con gli altri valori
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const newFine = `${fineDate.getFullYear()}-${pad(fineDate.getMonth() + 1)}-${pad(fineDate.getDate())}T${pad(fineDate.getHours())}:${pad(fineDate.getMinutes())}`;
+    setDataOraFine(newFine);
+  }, [dataOraInizio]);
+
   // Sincronizza la parte data di inizio/fine quando cambia il campo Data,
   // mantenendo l'ora inserita dall'utente. Se i campi sono vuoti, non li tocca.
   useEffect(() => {
@@ -321,21 +344,21 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
     }
   }, [rifAssistenzeList, rifAssistenzaId, clienteId, tipologia, indirizzo]);
 
-  // Images (only in edit mode)
+  // Files (only in edit mode) — letti dalla cartella SharePoint della registrazione
   const { data: images, refetch: refetchImages } = useQuery({
-    queryKey: ['images', assistenza?.id],
-    queryFn: () => fetchImages(assistenza!.id),
+    queryKey: ['sharepointFiles', assistenza?.id],
+    queryFn: () => fetchSharepointFiles(assistenza!.id),
     enabled: !isCreate && !!assistenza?.id,
     staleTime: 60 * 1000,
   });
 
-  // Separa la firma cliente dalle immagini standard
+  // Separa la firma cliente dai file standard tramite filename
   const signatureAnnotation = useMemo(
-    () => images?.find((img) => img.subject === SIGNATURE_SUBJECT) ?? null,
+    () => images?.find((img) => img.name === SIGNATURE_FILENAME) ?? null,
     [images],
   );
   const filteredImages = useMemo(
-    () => images?.filter((img) => img.subject !== SIGNATURE_SUBJECT),
+    () => images?.filter((img) => img.name !== SIGNATURE_FILENAME),
     [images],
   );
 
@@ -376,27 +399,30 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
           };
           reader.readAsDataURL(file);
         });
-        await uploadImage(recordId, file.name, file.type, base64);
+        await uploadSharepointFile(recordId, file.name, file.type, base64);
       }
       setLocalPreviews([]);
       if (!targetId) refetchImages();
       addToast({ title: 'Caricamento completato', description: 'Immagini caricate con successo', color: 'success' });
-    } catch {
-      addToast({ title: 'Errore', description: 'Caricamento immagini fallito', color: 'danger' });
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || err?.message || 'Caricamento immagini fallito';
+      addToast({ title: 'Errore', description: msg, color: 'danger' });
     } finally {
       setUploading(false);
     }
   }, [assistenza?.id, localPreviews, refetchImages]);
 
-  const handleDeleteImage = useCallback(async (annotationId: string) => {
+  const handleDeleteImage = useCallback(async (itemId: string) => {
+    if (!assistenza?.id) return;
     try {
-      await deleteImage(annotationId);
+      await deleteSharepointFile(assistenza.id, itemId);
       refetchImages();
       addToast({ title: 'Eliminata', description: 'Immagine eliminata', color: 'success' });
-    } catch {
-      addToast({ title: 'Errore', description: 'Eliminazione fallita', color: 'danger' });
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || err?.message || 'Eliminazione fallita';
+      addToast({ title: 'Errore', description: msg, color: 'danger' });
     }
-  }, [refetchImages]);
+  }, [assistenza?.id, refetchImages]);
 
   // Tipologie sincronizzate da Dataverse (option set di phyo_tipologia_assistenza).
   // Tutte le opzioni sono sempre selezionabili: il filtro avviene solo se
@@ -584,10 +610,11 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
         }
         if (pendingSignature && result?.id) {
           try {
-            await uploadImage(result.id, 'firma_cliente.png', 'image/png', pendingSignature, SIGNATURE_SUBJECT);
+            await uploadSharepointFile(result.id, SIGNATURE_FILENAME, 'image/png', pendingSignature);
             setPendingSignature(null);
-          } catch {
-            addToast({ title: 'Attenzione', description: 'Firma non caricata, riprovare dal dettaglio', color: 'warning' });
+          } catch (err: any) {
+            const msg = err?.response?.data?.error || err?.message || 'Firma non caricata';
+            addToast({ title: 'Attenzione', description: msg, color: 'warning' });
           }
         }
         queryClient.invalidateQueries({ queryKey: ['assistenzeRegistrazioni'] });
@@ -659,9 +686,6 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
                   {a.statoRegistrazione}
                 </Chip>
               </div>
-              {a.rifAssistenzaNome && (
-                <p className="text-sm text-default-400 mt-0.5">Rif. {a.rifAssistenzaNome}</p>
-              )}
             </>
           )}
         </div>
@@ -708,29 +732,6 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
         <p className="sm:hidden -mt-1 text-xs text-default-500">
           {saveStatus === 'saving' ? 'Salvataggio...' : saveStatus === 'error' ? 'Errore salvataggio' : `Salvato ${formatSavedAgo}`}
         </p>
-      )}
-
-      {/* Info (read-only) — only for edit mode */}
-      {!isCreate && (
-        <Card shadow="sm" className="bg-centoraggi-surface border border-centoraggi-accent/20">
-          <CardBody className="gap-2 p-4">
-            <p className="text-xs font-semibold text-centoraggi-primary uppercase tracking-wider">Informazioni</p>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
-              <div>
-                <span className="text-default-400 text-xs">NR</span>
-                <p className="font-medium">{a.nr}</p>
-              </div>
-              <div>
-                <span className="text-default-400 text-xs">Data</span>
-                <p>{a.data ? new Date(a.data).toLocaleDateString('it-IT') : '—'}</p>
-              </div>
-              <div>
-                <span className="text-default-400 text-xs">Rif. Assistenza</span>
-                <p>{a.rifAssistenzaNome || '—'}</p>
-              </div>
-            </div>
-          </CardBody>
-        </Card>
       )}
 
       {/* Editable form */}
@@ -884,7 +885,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
           <div className="grid grid-cols-1 lg:grid-cols-[0.8fr_1.2fr] gap-3 items-start">
             <div className="space-y-2.5">
               <Input
-                label="Data"
+                label="Data registrazione"
                 value={data}
                 onValueChange={setData}
                 variant="bordered"
@@ -926,7 +927,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
                     label="Ore Intervento"
                     placeholder="00:00:00"
                     value={oreIntervento}
-                    onValueChange={setOreIntervento}
+                    onValueChange={updateOreIntervento}
                     variant="bordered"
                     type="time"
                     classNames={{ inputWrapper: 'bg-[#FAFBFC]' }}

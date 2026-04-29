@@ -59,9 +59,32 @@ export default function CalendarPage({ risorsaId, onOpen, onCreateNew }: Calenda
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
+  const { data: rangeRange } = useMemo(() => {
+    let start: Date;
+    let end: Date;
+    if (viewMode === 'day') {
+      start = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate());
+      end = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(), 23, 59, 59);
+    } else if (viewMode === 'week') {
+      start = getWeekStart(selectedDate);
+      end = addDays(start, 6);
+      end.setHours(23, 59, 59, 999);
+    } else {
+      // month: include leading/trailing days shown in grid
+      const firstOfMonth = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
+      start = getWeekStart(firstOfMonth);
+      end = addDays(start, 41);
+      end.setHours(23, 59, 59, 999);
+    }
+    return { data: { start, end } };
+  }, [selectedDate, viewMode]);
+
+  const rangeFromISO = rangeRange.start.toISOString();
+  const rangeToISO = rangeRange.end.toISOString();
+
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['assistenze-calendar', risorsaId],
-    queryFn: () => fetchAssistenzeRegistrazioni(risorsaId),
+    queryKey: ['assistenze-calendar', risorsaId, rangeFromISO, rangeToISO],
+    queryFn: () => fetchAssistenzeRegistrazioni(risorsaId, { from: rangeFromISO, to: rangeToISO }),
     staleTime: 1000 * 60 * 5,
   });
 
@@ -139,7 +162,7 @@ export default function CalendarPage({ risorsaId, onOpen, onCreateNew }: Calenda
       await updateAssistenza(id, { phyo_data: newDateISO });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['assistenze-calendar', risorsaId] });
+      queryClient.invalidateQueries({ queryKey: ['assistenze-calendar'] });
       queryClient.invalidateQueries({ queryKey: ['assistenzeRegistrazioni'] });
       addToast({ title: 'Intervento spostato', color: 'success' });
     },
@@ -189,8 +212,8 @@ export default function CalendarPage({ risorsaId, onOpen, onCreateNew }: Calenda
     const newDateISO = next.toISOString();
 
     // Optimistic update sulla cache calendario
-    queryClient.setQueryData<{ data: any[] } | undefined>(
-      ['assistenze-calendar', risorsaId],
+    queryClient.setQueriesData<{ data: any[] } | undefined>(
+      { queryKey: ['assistenze-calendar'] },
       (prev) => {
         if (!prev) return prev;
         return {
@@ -280,12 +303,53 @@ export default function CalendarPage({ risorsaId, onOpen, onCreateNew }: Calenda
       <div className="grid gap-3 sm:gap-6 xl:grid-cols-[1fr_340px]">
         <Card shadow="sm" className="bg-[#FAFBFC] border border-centoraggi-accent/20">
           <CardBody className="space-y-3 sm:space-y-4 p-2 sm:p-4">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
                 <p className="text-sm font-semibold text-slate-900">{viewMode === 'week' ? currentWeekLabel : currentMonthLabel}</p>
                 <p className="text-xs text-default-400">{viewMode === 'day' ? formatShortDate(selectedDate) : 'Calendario mensile'}</p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <input
+                  type="date"
+                  aria-label="Vai a data"
+                  value={`${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (!v) return;
+                    const [y, m, d] = v.split('-').map(Number);
+                    setSelectedDate(new Date(y, (m || 1) - 1, d || 1));
+                  }}
+                  className="h-8 px-2 rounded-md border border-default-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+                />
+                <select
+                  aria-label="Mese"
+                  value={selectedDate.getMonth()}
+                  onChange={(e) => {
+                    const m = parseInt(e.target.value, 10);
+                    setSelectedDate((prev) => new Date(prev.getFullYear(), m, 1));
+                  }}
+                  className="h-8 px-2 rounded-md border border-default-200 bg-white text-sm capitalize focus:outline-none focus:ring-2 focus:ring-primary-300"
+                >
+                  {Array.from({ length: 12 }, (_, i) => (
+                    <option key={i} value={i}>
+                      {new Date(2000, i, 1).toLocaleDateString('it-IT', { month: 'long' })}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  aria-label="Anno"
+                  value={selectedDate.getFullYear()}
+                  onChange={(e) => {
+                    const y = parseInt(e.target.value, 10);
+                    setSelectedDate((prev) => new Date(y, prev.getMonth(), 1));
+                  }}
+                  className="h-8 px-2 rounded-md border border-default-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+                >
+                  {Array.from({ length: 11 }, (_, i) => {
+                    const y = new Date().getFullYear() - 5 + i;
+                    return <option key={y} value={y}>{y}</option>;
+                  })}
+                </select>
                 <Button
                   variant="flat"
                   size="sm"

@@ -1,5 +1,6 @@
 import { app, HttpRequest, HttpResponseInit } from '@azure/functions';
 import { DataverseService } from '../../services/dataverseService.js';
+import { SharePointService } from '../../services/sharepointService.js';
 import { isGuid, requireAuth } from '../../services/auth.js';
 
 const dataverseService = new DataverseService(
@@ -8,6 +9,16 @@ const dataverseService = new DataverseService(
   process.env.DATAVERSE_CLIENT_SECRET || '',
   process.env.DATAVERSE_TENANT_ID || ''
 );
+
+const sharepointService = new SharePointService({
+  tenantId: process.env.DATAVERSE_TENANT_ID || '',
+  clientId: process.env.DATAVERSE_CLIENT_ID || '',
+  clientSecret: process.env.DATAVERSE_CLIENT_SECRET || '',
+  tenantHost: process.env.SHAREPOINT_TENANT_HOST || '',
+  sitePath: process.env.SHAREPOINT_SITE_PATH || '',
+  driveName: process.env.SHAREPOINT_DRIVE_NAME || '',
+  siteId: process.env.SHAREPOINT_SITE_ID || undefined,
+});
 
 export async function dataverseAssistenze(request: HttpRequest): Promise<HttpResponseInit> {
   const auth = requireAuth(request);
@@ -21,6 +32,8 @@ export async function dataverseAssistenze(request: HttpRequest): Promise<HttpRes
 
     const pageSizeParam = request.query.get('pageSize');
     const skipToken = request.query.get('skipToken') || undefined;
+    const fromISO = request.query.get('from') || undefined;
+    const toISO = request.query.get('to') || undefined;
 
     if (pageSizeParam) {
       const pageSize = parseInt(pageSizeParam, 10);
@@ -41,7 +54,7 @@ export async function dataverseAssistenze(request: HttpRequest): Promise<HttpRes
       };
     }
 
-    const assistenze = await dataverseService.getAssistenze(auth.user.id);
+    const assistenze = await dataverseService.getAssistenze(auth.user.id, fromISO, toISO);
     return {
       status: 200,
       jsonBody: {
@@ -72,7 +85,6 @@ const ALLOWED_FIELDS = new Set([
   'phyo_costoorario',
   '_phyo_rifassistenza_value',
   '_phyo_cliente_value',
-  'phyo_tipologia_assistenza',
   'phyo_statoreg',
   'phyo_data',
 ]);
@@ -110,16 +122,15 @@ export async function updateAssistenza(request: HttpRequest): Promise<HttpRespon
       // Dataverse non accetta @odata.bind=null su PATCH; per dissociare serve un DELETE
       // sulla navigation property. Omettiamo la binding se il valore è null.
       if (rifId) {
-        sanitized['phyo_RifAssistenza@odata.bind'] = `/phyo_assistenzes(${rifId})`;
+        sanitized['phyo_Rifassistenza@odata.bind'] = `/phyo_assistenzes(${rifId})`;
       }
     }
 
     if ('_phyo_cliente_value' in sanitized) {
-      const clienteId = sanitized._phyo_cliente_value as string | null;
+      // Il lookup phyo_cliente non esiste sulla tabella phyo_assistenzeregistrazioni:
+      // il cliente viene ereditato dalla phyo_assistenze collegata via phyo_rifassistenza.
+      // Scartiamo il valore per evitare l'errore "undeclared property phyo_Cliente".
       delete sanitized._phyo_cliente_value;
-      if (clienteId) {
-        sanitized['phyo_Cliente@odata.bind'] = `/accounts(${clienteId})`;
-      }
     }
 
     await dataverseService.updateAssistenza(id, sanitized);
@@ -151,7 +162,6 @@ const CREATE_ALLOWED_FIELDS = new Set([
   'phyo_data',
   '_phyo_rifassistenza_value',
   '_phyo_cliente_value',
-  'phyo_tipologia_assistenza',
 ]);
 
 export async function createAssistenza(request: HttpRequest): Promise<HttpResponseInit> {
@@ -173,21 +183,24 @@ export async function createAssistenza(request: HttpRequest): Promise<HttpRespon
     if (sanitized._phyo_rifassistenza_value) {
       const rifId = sanitized._phyo_rifassistenza_value as string;
       delete sanitized._phyo_rifassistenza_value;
-      sanitized['phyo_RifAssistenza@odata.bind'] = `/phyo_assistenzes(${rifId})`;
+      sanitized['phyo_Rifassistenza@odata.bind'] = `/phyo_assistenzes(${rifId})`;
+      // Se è presente il riferimento all'assistenza, il cliente viene
+      // ereditato dalla phyo_assistenze collegata: non lo inviamo per evitare
+      // l'errore "undeclared property phyo_Cliente" (lookup non presente sulla
+      // tabella phyo_assistenzeregistrazioni).
+      delete sanitized._phyo_cliente_value;
     } else {
       delete sanitized._phyo_rifassistenza_value;
-    }
-
-    if (sanitized._phyo_cliente_value) {
-      const clienteId = sanitized._phyo_cliente_value as string;
-      delete sanitized._phyo_cliente_value;
-      sanitized['phyo_Cliente@odata.bind'] = `/accounts(${clienteId})`;
-    } else {
+      // TODO: gestire il caso in cui non c'è phyo_rifassistenza
+      // (decidere se creare il lookup phyo_cliente sulla registrazione
+      // o se rendere il rif assistenza obbligatorio).
       delete sanitized._phyo_cliente_value;
     }
 
-    const nextNr = await dataverseService.getNextAssistenzaNr();
-    sanitized.phyo_nr = nextNr;
+    // phyo_nr è una colonna di numerazione automatica (autonumber) lato Dataverse:
+    // NON va valorizzata dal client, altrimenti il valore inviato sovrascrive
+    // quello generato automaticamente (prefisso AR-XXXX).
+    delete (sanitized as any).phyo_nr;
 
     const id = await dataverseService.createAssistenza(sanitized);
     return {
@@ -444,4 +457,247 @@ app.http('deleteAnnotation', {
   authLevel: 'anonymous',
   route: 'dataverse/annotations/{annotationId}',
   handler: deleteAnnotation,
+});
+
+/**
+ * Upload di un file su SharePoint legato ad una registrazione di assistenza.
+ * La cartella viene creata (se non esiste) seguendo lo schema:
+ *   <driveAssistenze>/<TipologiaAssistenza>/<NrAssistenza> - <Cliente>/
+ * Richiede che la registrazione abbia un phyo_rifassistenza valorizzato.
+ */
+export async function uploadSharepointFile(request: HttpRequest): Promise<HttpResponseInit> {
+  const auth = requireAuth(request);
+  if (auth.response) return auth.response;
+
+  try {
+    const registrazioneId = request.params.registrazioneId;
+    if (!registrazioneId || !isGuid(registrazioneId)) {
+      return { status: 400, jsonBody: { error: 'registrazioneId non valido' } };
+    }
+
+    const ownsRecord = await dataverseService.userOwnsAssistenza(registrazioneId, auth.user.id);
+    if (!ownsRecord) {
+      return { status: 403, jsonBody: { error: 'Accesso negato a questa registrazione' } };
+    }
+
+    const body = (await request.json()) as {
+      filename?: string;
+      mimetype?: string;
+      documentbody?: string;
+    };
+
+    if (!body.filename || !body.mimetype || !body.documentbody) {
+      return {
+        status: 400,
+        jsonBody: { error: 'filename, mimetype e documentbody sono obbligatori' },
+      };
+    }
+
+    // 25 MB base64 ≈ 18 MB binario: limite ragionevole per foto da smartphone.
+    if (body.documentbody.length > 25_000_000) {
+      return { status: 400, jsonBody: { error: 'File troppo grande (max ~18 MB)' } };
+    }
+
+    const folderInfo = await dataverseService.getSharePointFolderInfo(registrazioneId);
+    if (!folderInfo) {
+      return {
+        status: 400,
+        jsonBody: {
+          error:
+            'Impossibile determinare la cartella SharePoint: la registrazione deve avere un riferimento assistenza con tipologia, numero e cliente valorizzati.',
+        },
+      };
+    }
+
+    const result = await sharepointService.uploadAssistenzaFile({
+      tipologiaLabel: folderInfo.tipologiaLabel,
+      nrAssistenza: folderInfo.nrAssistenza,
+      clienteName: folderInfo.clienteName,
+      filename: body.filename,
+      mimetype: body.mimetype,
+      contentBase64: body.documentbody,
+    });
+
+    // Salva su Dataverse l'URL della cartella (se non già impostato)
+    try {
+      await dataverseService.setCartellaSharepoint(registrazioneId, result.folderWebUrl);
+    } catch (e: any) {
+      console.warn('setCartellaSharepoint failed (non blocking):', e?.message || e);
+    }
+
+    return {
+      status: 201,
+      jsonBody: {
+        success: true,
+        fileId: result.fileId,
+        webUrl: result.webUrl,
+        folderWebUrl: result.folderWebUrl,
+        folderPath: result.folderPath,
+      },
+    };
+  } catch (error: any) {
+    const detail = error?.response?.data || error?.message || String(error);
+    console.error('uploadSharepointFile error:', detail);
+    const graphErrorMessage =
+      error?.response?.data?.error?.message ||
+      error?.message ||
+      (typeof detail === 'string' ? detail : undefined);
+    const graphCode = error?.graphCode || error?.response?.data?.error?.code;
+    const graphUrl = error?.graphUrl;
+    const composed = [
+      'Upload SharePoint fallito',
+      graphCode ? `[${graphCode}]` : '',
+      graphErrorMessage,
+      graphUrl ? `(${graphUrl})` : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    return {
+      status: 500,
+      jsonBody: {
+        error: composed,
+        message:
+          process.env.NODE_ENV === 'development'
+            ? error?.response?.data || error?.message
+            : undefined,
+      },
+    };
+  }
+}
+
+app.http('uploadSharepointFile', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'dataverse/assistenze/{registrazioneId}/sharepoint-files',
+  handler: uploadSharepointFile,
+});
+
+/** Elenca i file presenti nella cartella SharePoint della registrazione. */
+export async function listSharepointFiles(request: HttpRequest): Promise<HttpResponseInit> {
+  const auth = requireAuth(request);
+  if (auth.response) return auth.response;
+
+  try {
+    const registrazioneId = request.params.registrazioneId;
+    if (!registrazioneId || !isGuid(registrazioneId)) {
+      return { status: 400, jsonBody: { error: 'registrazioneId non valido' } };
+    }
+
+    const ownsRecord = await dataverseService.userOwnsAssistenza(registrazioneId, auth.user.id);
+    if (!ownsRecord) {
+      return { status: 403, jsonBody: { error: 'Accesso negato a questa registrazione' } };
+    }
+
+    const folderInfo = await dataverseService.getSharePointFolderInfo(registrazioneId);
+    if (!folderInfo) {
+      return { status: 200, jsonBody: { success: true, data: [] } };
+    }
+
+    const items = await sharepointService.listAssistenzaFiles({
+      tipologiaLabel: folderInfo.tipologiaLabel,
+      nrAssistenza: folderInfo.nrAssistenza,
+      clienteName: folderInfo.clienteName,
+    });
+
+    return { status: 200, jsonBody: { success: true, data: items } };
+  } catch (error: any) {
+    console.error('listSharepointFiles error:', error?.response?.data || error?.message || error);
+    const graphMsg = error?.response?.data?.error?.message;
+    return {
+      status: 500,
+      jsonBody: {
+        error: graphMsg ? `Lettura cartella SharePoint fallita: ${graphMsg}` : 'Lettura cartella SharePoint fallita',
+      },
+    };
+  }
+}
+
+app.http('listSharepointFiles', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'dataverse/assistenze/{registrazioneId}/sharepoint-files',
+  handler: listSharepointFiles,
+});
+
+/** Elimina un file SharePoint legato ad una registrazione. */
+export async function deleteSharepointFile(request: HttpRequest): Promise<HttpResponseInit> {
+  const auth = requireAuth(request);
+  if (auth.response) return auth.response;
+
+  try {
+    const registrazioneId = request.params.registrazioneId;
+    const itemId = request.params.itemId;
+    if (!registrazioneId || !isGuid(registrazioneId)) {
+      return { status: 400, jsonBody: { error: 'registrazioneId non valido' } };
+    }
+    if (!itemId) {
+      return { status: 400, jsonBody: { error: 'itemId mancante' } };
+    }
+
+    const ownsRecord = await dataverseService.userOwnsAssistenza(registrazioneId, auth.user.id);
+    if (!ownsRecord) {
+      return { status: 403, jsonBody: { error: 'Accesso negato a questa registrazione' } };
+    }
+
+    await sharepointService.deleteFile(itemId);
+    return { status: 200, jsonBody: { success: true } };
+  } catch (error: any) {
+    console.error('deleteSharepointFile error:', error?.response?.data || error?.message || error);
+    const graphMsg = error?.response?.data?.error?.message;
+    return {
+      status: 500,
+      jsonBody: {
+        error: graphMsg ? `Eliminazione file SharePoint fallita: ${graphMsg}` : 'Eliminazione file SharePoint fallita',
+      },
+    };
+  }
+}
+
+app.http('deleteSharepointFile', {
+  methods: ['DELETE'],
+  authLevel: 'anonymous',
+  route: 'dataverse/assistenze/{registrazioneId}/sharepoint-files/{itemId}',
+  handler: deleteSharepointFile,
+});
+
+/** Endpoint diagnostico: verifica risoluzione site/drive SharePoint senza upload. */
+export async function sharepointProbe(request: HttpRequest): Promise<HttpResponseInit> {
+  const auth = requireAuth(request);
+  if (auth.response) return auth.response;
+  try {
+    const info = await sharepointService.probe();
+    return {
+      status: 200,
+      jsonBody: {
+        success: true,
+        config: {
+          tenantHost: process.env.SHAREPOINT_TENANT_HOST,
+          sitePath: process.env.SHAREPOINT_SITE_PATH,
+          driveName: process.env.SHAREPOINT_DRIVE_NAME,
+          siteIdEnv: process.env.SHAREPOINT_SITE_ID || null,
+        },
+        info,
+      },
+    };
+  } catch (error: any) {
+    const detail = error?.response?.data || error?.message || String(error);
+    console.error('sharepointProbe error:', detail);
+    return {
+      status: 500,
+      jsonBody: {
+        error: 'Probe SharePoint fallito',
+        graphCode: error?.graphCode || error?.response?.data?.error?.code,
+        graphMessage: error?.response?.data?.error?.message || error?.message,
+        graphUrl: error?.graphUrl,
+        detail: process.env.NODE_ENV === 'development' ? detail : undefined,
+      },
+    };
+  }
+}
+
+app.http('sharepointProbe', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'dataverse/sharepoint-probe',
+  handler: sharepointProbe,
 });

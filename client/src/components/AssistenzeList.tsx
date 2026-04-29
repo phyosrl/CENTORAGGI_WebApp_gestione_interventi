@@ -3,14 +3,14 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { fadeInUp, staggerContainer, collapsibleSection } from './motion';
 import {
   Search,
-  ChevronDown,
   ClipboardList,
   Wrench,
   PauseCircle,
   CheckCircle2,
-  FileText,
   MapPin,
   Filter,
+  Clock,
+  X,
   type LucideIcon,
 } from 'lucide-react';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -36,12 +36,13 @@ import {
   PopoverContent,
   Select,
   SelectItem,
+  Checkbox,
+  CheckboxGroup,
   addToast,
 } from '@heroui/react';
 import { fetchAssistenzeRegistrazioni, fetchRifAssistenze, updateAssistenza } from '../services/api';
 import { getActiveTimers } from '../services/timerStore';
 import {
-  AssistenzaRegistrazioneRaw,
   AssistenzaRegistrazione,
   mapAssistenzaRegistrazione,
 } from '../types/assistenzaRegistrazione';
@@ -66,6 +67,15 @@ function formatNumber(value: number | null): string {
 function formatCurrency(value: number | null): string {
   if (value == null) return '—';
   return value.toLocaleString('it-IT', { style: 'currency', currency: 'EUR' });
+}
+
+function formatOre(value: number | null): string | null {
+  if (value == null || isNaN(value)) return null;
+  const total = Math.max(0, value);
+  const h = Math.floor(total);
+  const m = Math.round((total - h) * 60);
+  if (m === 60) return `${h + 1}:00`;
+  return `${h}:${String(m).padStart(2, '0')}`;
 }
 
 const STATO_REG_ORDER = ['Programmato', 'In lavorazione', 'Sospeso', 'Chiuso'];
@@ -102,9 +112,75 @@ interface AssistenzeListProps {
   risorsaId: string;
   onOpen: (a: AssistenzaRegistrazione) => void;
   onCreateNew: () => void;
+  title?: string;
+  defaultStatoFilter?: string[];
 }
 
 const PAGE_SIZE = 20;
+
+function ChoicesFilterPanel({
+  label,
+  choices,
+  selected,
+  onChange,
+  searchable,
+}: {
+  label: string;
+  choices: string[];
+  selected: Set<string>;
+  onChange: (next: Set<string>) => void;
+  searchable?: boolean;
+}) {
+  const [q, setQ] = useState('');
+  const filtered = useMemo(() => {
+    if (!searchable || !q.trim()) return choices;
+    const v = q.toLowerCase();
+    return choices.filter((c) => c.toLowerCase().includes(v));
+  }, [choices, q, searchable]);
+  return (
+    <div className="p-2 w-64 max-h-80 overflow-auto">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs font-medium text-default-600">{label}</span>
+        {selected.size > 0 && (
+          <button
+            type="button"
+            className="text-[11px] text-primary hover:underline"
+            onClick={() => onChange(new Set())}
+          >
+            Pulisci
+          </button>
+        )}
+      </div>
+      {searchable && (
+        <Input
+          size="sm"
+          placeholder="Cerca..."
+          value={q}
+          onValueChange={setQ}
+          isClearable
+          onClear={() => setQ('')}
+          variant="bordered"
+          className="mb-2"
+        />
+      )}
+      {filtered.length === 0 ? (
+        <p className="text-xs text-default-400 px-1 py-2">Nessun risultato</p>
+      ) : (
+        <CheckboxGroup
+          size="sm"
+          value={Array.from(selected)}
+          onValueChange={(vals) => onChange(new Set(vals))}
+        >
+          {filtered.map((c) => (
+            <Checkbox key={c} value={c}>
+              {c}
+            </Checkbox>
+          ))}
+        </CheckboxGroup>
+      )}
+    </div>
+  );
+}
 
 function MapButton({ address }: { address?: string | null }) {
   const has = !!(address && address.trim());
@@ -131,9 +207,13 @@ function MapButton({ address }: { address?: string | null }) {
   );
 }
 
-export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: AssistenzeListProps) {
+export default function AssistenzeList({ risorsaId, onOpen, onCreateNew, title = 'Le mie registrazioni', defaultStatoFilter = ['Programmato', 'In lavorazione'] }: AssistenzeListProps) {
   const [search, setSearch] = useState('');
   const [tipologiaFilter, setTipologiaFilter] = useState<Set<string>>(new Set());
+  const [clienteFilter, setClienteFilter] = useState<Set<string>>(new Set());
+  const [statoRegFilter, setStatoRegFilter] = useState<Set<string>>(
+    () => new Set(defaultStatoFilter),
+  );
   const [colFilters, setColFilters] = useState<Record<string, string>>({});
   const setColFilter = useCallback((key: string, value: string) => {
     setColFilters((prev) => {
@@ -143,8 +223,6 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
       return next;
     });
   }, []);
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
-  const [viewMode, setViewMode] = useState<'global' | 'grouped' | 'manutenzioni'>('grouped');
   const [loadingAll, setLoadingAll] = useState(false);
   const [sortDescriptor, setSortDescriptor] = useState<{ column: React.Key; direction: 'ascending' | 'descending' }>({
     column: 'data',
@@ -247,11 +325,15 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
     );
   }, [handleQuickStatus]);
 
-  const renderHeader = useCallback((key: string, label: string) => {
+  const renderHeader = useCallback((key: string, label: string, options?: { choices?: string[]; selected?: Set<string>; onChange?: (next: Set<string>) => void; searchable?: boolean; inputType?: 'text' | 'date' }) => {
     const value = colFilters[key] || '';
+    const hasChoices = !!options?.choices;
+    const choiceCount = options?.selected?.size ?? 0;
+    const isActive = hasChoices ? choiceCount > 0 : !!value;
+    const inputType = options?.inputType || 'text';
     return (
-      <div className="flex items-center justify-between gap-1 w-full">
-        <span>{label}</span>
+      <div className="flex items-center justify-between gap-1 w-full text-left">
+        <span className="truncate">{label}</span>
         <Popover placement="bottom-end">
           <PopoverTrigger>
             <span
@@ -262,24 +344,44 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
               onMouseDown={(e) => e.stopPropagation()}
               onClick={(e) => e.stopPropagation()}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') e.stopPropagation(); }}
-              className={`inline-flex items-center justify-center w-5 h-5 rounded hover:bg-default-200 transition-colors cursor-pointer ${value ? 'text-primary' : 'text-default-400'}`}
+              className={`inline-flex items-center justify-center w-5 h-5 rounded hover:bg-default-200 transition-colors cursor-pointer ${isActive ? 'text-primary' : 'text-default-400'}`}
             >
               <Filter className="w-3 h-3" />
             </span>
           </PopoverTrigger>
           <PopoverContent>
-            <div className="p-2 w-56">
-              <Input
-                size="sm"
-                autoFocus
-                placeholder={`Filtra ${label.toLowerCase()}...`}
-                value={value}
-                onValueChange={(v) => setColFilter(key, v)}
-                isClearable
-                onClear={() => setColFilter(key, '')}
-                variant="bordered"
+            {hasChoices ? (
+              <ChoicesFilterPanel
+                label={label}
+                choices={options!.choices!}
+                selected={options!.selected ?? new Set()}
+                onChange={options!.onChange!}
+                searchable={options?.searchable}
               />
-            </div>
+            ) : (
+              <div className="p-2 w-56">
+                <Input
+                  size="sm"
+                  autoFocus
+                  type={inputType}
+                  placeholder={inputType === 'date' ? '' : `Filtra ${label.toLowerCase()}...`}
+                  value={value}
+                  onValueChange={(v) => setColFilter(key, v)}
+                  isClearable={inputType !== 'date'}
+                  onClear={() => setColFilter(key, '')}
+                  variant="bordered"
+                />
+                {inputType === 'date' && value && (
+                  <button
+                    type="button"
+                    className="mt-1 text-[11px] text-primary hover:underline"
+                    onClick={() => setColFilter(key, '')}
+                  >
+                    Pulisci
+                  </button>
+                )}
+              </div>
+            )}
           </PopoverContent>
         </Popover>
       </div>
@@ -396,10 +498,24 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
     return Array.from(set).sort();
   }, [assistenze]);
 
+  const clienteOptions = useMemo(() => {
+    const set = new Set<string>();
+    assistenze.forEach((a) => {
+      if (a.clienteNome) set.add(a.clienteNome);
+    });
+    return Array.from(set).sort((x, y) => x.localeCompare(y, 'it'));
+  }, [assistenze]);
+
   const filtered = useMemo(() => {
     let result = assistenze;
     if (tipologiaFilter.size > 0) {
       result = result.filter((a) => tipologiaFilter.has(a.tipologiaAssistenza));
+    }
+    if (clienteFilter.size > 0) {
+      result = result.filter((a) => clienteFilter.has(a.clienteNome || ''));
+    }
+    if (statoRegFilter.size > 0) {
+      result = result.filter((a) => statoRegFilter.has(a.statoReg));
     }
     // Filtri per-colonna (contains, case-insensitive)
     const entries = Object.entries(colFilters).filter(([, v]) => v && v.trim());
@@ -409,12 +525,17 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
           const v = raw.toLowerCase();
           let cell = '';
           switch (key) {
-            case 'data': cell = formatDate(a.data).toLowerCase(); break;
+            case 'data': {
+              // raw è yyyy-mm-dd dal date picker
+              if (!a.data) return false;
+              const d = new Date(a.data);
+              const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+              if (iso !== raw) return false;
+              continue;
+            }
             case 'nr': cell = a.nr.toLowerCase(); break;
             case 'cliente': cell = a.clienteNome.toLowerCase(); break;
-            case 'tipologia': cell = a.tipologiaAssistenza.toLowerCase(); break;
             case 'rif': cell = a.rifAssistenzaNome.toLowerCase(); break;
-            case 'statoreg': cell = (a.statoReg || '').toLowerCase(); break;
             case 'attne': cell = a.attne.toLowerCase(); break;
             case 'descrizione': cell = a.descrizioneIntervento.toLowerCase(); break;
             default: cell = '';
@@ -436,98 +557,53 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
         a.descrizioneIntervento.toLowerCase().includes(q) ||
         a.materialeUtilizzato.toLowerCase().includes(q)
     );
-  }, [assistenze, search, tipologiaFilter, colFilters]);
+  }, [assistenze, search, tipologiaFilter, clienteFilter, statoRegFilter, colFilters]);
 
   const globalFiltered = useMemo(() => {
-    return filtered
-      .filter((a) => a.statoReg !== 'Chiuso')
-      .sort((a, b) => {
-        if (!a.data && !b.data) return 0;
-        if (!a.data) return 1;
-        if (!b.data) return -1;
-        return new Date(b.data).getTime() - new Date(a.data).getTime();
-      });
+    return [...filtered].sort((a, b) => {
+      if (!a.data && !b.data) return 0;
+      if (!a.data) return 1;
+      if (!b.data) return -1;
+      return new Date(b.data).getTime() - new Date(a.data).getTime();
+    });
   }, [filtered]);
 
   // Riferimento stabile per HeroUI Table + bailout React: ricomputato solo
   // quando cambiano filtro o sortDescriptor.
   const globalSorted = useMemo(() => sortItems(globalFiltered), [sortItems, globalFiltered]);
 
-  const MANUTENZIONI_STATI = ['Programmato', 'In lavorazione'];
+  // Conteggi per stato (calcolati prima del filtro per stato), per le stats card
+  const statoCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const stato of STATO_REG_ORDER) map.set(stato, 0);
+    for (const a of assistenze) {
+      const k = a.statoReg || 'Altro';
+      map.set(k, (map.get(k) ?? 0) + 1);
+    }
+    return STATO_REG_ORDER.map((stato) => ({ stato, count: map.get(stato) ?? 0 }));
+  }, [assistenze]);
 
-  const manutenzioniGrouped = useMemo(() => {
-    const map = new Map<string, AssistenzaRegistrazione[]>();
-    for (const stato of MANUTENZIONI_STATI) {
-      map.set(stato, []);
-    }
-    for (const a of filtered) {
-      if (MANUTENZIONI_STATI.includes(a.statoReg)) {
-        map.get(a.statoReg)!.push(a);
-      }
-    }
-    for (const items of map.values()) {
-      items.sort((a, b) => {
-        if (!a.data && !b.data) return 0;
-        if (!a.data) return 1;
-        if (!b.data) return -1;
-        return new Date(b.data).getTime() - new Date(a.data).getTime();
-      });
-    }
-    return MANUTENZIONI_STATI.map(stato => ({ stato, items: map.get(stato) || [] }));
-  }, [filtered]);
+  const hasActiveFilters =
+    !!search ||
+    tipologiaFilter.size > 0 ||
+    clienteFilter.size > 0 ||
+    Object.keys(colFilters).length > 0 ||
+    statoRegFilter.size > 0;
 
-  const grouped = useMemo(() => {
-    const map = new Map<string, AssistenzaRegistrazione[]>();
-    for (const stato of STATO_REG_ORDER) {
-      map.set(stato, []);
-    }
-    for (const a of filtered) {
-      const key = a.statoReg || 'Altro';
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(a);
-    }
-    // Sort each group by data descending
-    for (const items of map.values()) {
-      items.sort((a, b) => {
-        if (!a.data && !b.data) return 0;
-        if (!a.data) return 1;
-        if (!b.data) return -1;
-        return new Date(b.data).getTime() - new Date(a.data).getTime();
-      });
-    }
-    // Return all predefined groups (even if empty), in order
-    const result: { stato: string; items: AssistenzaRegistrazione[] }[] = [];
-    for (const stato of STATO_REG_ORDER) {
-      result.push({ stato, items: map.get(stato) || [] });
-    }
-    // Add any extra stati not in the predefined order
-    for (const [stato, items] of map) {
-      if (!STATO_REG_ORDER.includes(stato) && items.length > 0) {
-        result.push({ stato, items });
-      }
-    }
-    return result;
-  }, [filtered]);
-
-  const toggleGroup = useCallback((stato: string) => {
-    setExpandedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(stato)) {
-        next.delete(stato);
-      } else {
-        next.add(stato);
-      }
-      return next;
-    });
+  const resetFilters = useCallback(() => {
+    setSearch('');
+    setTipologiaFilter(new Set());
+    setClienteFilter(new Set());
+    setColFilters({});
+    setStatoRegFilter(new Set());
   }, []);
 
-  const expandAll = useCallback(() => {
-    setExpandedGroups(new Set(grouped.map((g) => g.stato)));
-  }, [grouped]);
-
-  const collapseAll = useCallback(() => {
-    setExpandedGroups(new Set());
-  }, []);
+  // Auto-load tutti i record quando ci sono filtri attivi (server-side filtering UX)
+  useEffect(() => {
+    if (hasActiveFilters && hasNextPage && !isFetchingNextPage && !loadingAll) {
+      void loadAll();
+    }
+  }, [hasActiveFilters, hasNextPage, isFetchingNextPage, loadingAll, loadAll]);
 
   if (isLoading) {
     return <ListSkeleton rows={6} statsCount={4} />;
@@ -546,52 +622,44 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
     >
       {/* Header + Stats */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-3">
-        <div className="min-w-0">
-          <h1 className="text-lg sm:text-2xl font-bold text-foreground">Le mie registrazioni</h1>
-          <div className="flex items-center gap-2 mt-0.5">
-            <Chip size="sm" variant="flat" color="success">
-              {allLoaded ? assistenze.length : `${loadedCount} / ${totalCount}`}
-            </Chip>
-            <span className="text-default-400 text-xs sm:text-sm">registrazion{assistenze.length === 1 ? 'e' : 'i'}{!allLoaded ? ' caricate' : ' totali'}</span>
+        <div className="min-w-0 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 flex-wrap">
+          <div>
+            <h1 className="text-lg sm:text-2xl font-bold text-foreground">{title}</h1>
+            <div className="flex items-center gap-2 mt-0.5">
+              <Chip size="sm" variant="flat" color="success">
+                {allLoaded ? assistenze.length : `${loadedCount} / ${totalCount}`}
+              </Chip>
+              <span className="text-default-400 text-xs sm:text-sm">registrazion{assistenze.length === 1 ? 'e' : 'i'}{!allLoaded ? ' caricate' : ' totali'}</span>
+            </div>
           </div>
+          <motion.div
+            className="flex gap-1.5 sm:gap-2 flex-wrap"
+            variants={staggerContainer}
+            initial="hidden"
+            animate="visible"
+          >
+            {statoCounts.map((g) => (
+              <motion.div key={g.stato} variants={fadeInUp}>
+                <Card shadow="sm" className="px-2 py-1 sm:px-3 sm:py-1.5">
+                  <div className="text-center">
+                    <p className="text-base sm:text-xl font-bold leading-tight" style={{ color: `var(--heroui-${statoRegColor[g.stato] || 'default'})` }}>
+                      {g.count}
+                    </p>
+                    <p className="text-[10px] sm:text-tiny text-default-400 leading-tight">{g.stato}</p>
+                  </div>
+                </Card>
+              </motion.div>
+            ))}
+          </motion.div>
         </div>
         <Button color="primary" onPress={onCreateNew} size="sm" className="w-full sm:w-auto">
           + Nuova registrazione
         </Button>
       </div>
 
-      {/* View mode toggle + filtri (sticky in mobile) */}
+      {/* Filtri (sticky in mobile) */}
       <div className="sticky top-[calc(4.5rem+44px)] sm:top-0 z-30 -mx-2 sm:-mx-4 px-2 sm:px-4 py-1.5 sm:py-0 bg-white/90 sm:bg-transparent backdrop-blur sm:backdrop-blur-0 border-b border-default-200/60 sm:border-0 sm:static">
       <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 sm:items-center">
-        <div className="flex gap-0.5 bg-default-100 rounded-lg p-0.5 sm:p-1 w-full sm:w-auto">
-          <Button
-            size="sm"
-            variant={viewMode === 'global' ? 'solid' : 'light'}
-            color={viewMode === 'global' ? 'primary' : 'default'}
-            onPress={() => setViewMode('global')}
-            className="flex-1 sm:flex-none px-2 sm:px-3"
-          >
-            Globale
-          </Button>
-          <Button
-            size="sm"
-            variant={viewMode === 'grouped' ? 'solid' : 'light'}
-            color={viewMode === 'grouped' ? 'primary' : 'default'}
-            onPress={() => setViewMode('grouped')}
-            className="flex-1 sm:flex-none px-2 sm:px-3"
-          >
-            Raggrupp.
-          </Button>
-          <Button
-            size="sm"
-            variant={viewMode === 'manutenzioni' ? 'solid' : 'light'}
-            color={viewMode === 'manutenzioni' ? 'secondary' : 'default'}
-            onPress={() => setViewMode('manutenzioni')}
-            className="flex-1 sm:flex-none px-2 sm:px-3"
-          >
-            Manuten.
-          </Button>
-        </div>
         <Input
           placeholder="Cerca NR, assistenza, descrizione..."
           value={search}
@@ -624,473 +692,220 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew }: Assis
             <SelectItem key={t} textValue={t}>{t}</SelectItem>
           ))}
         </Select>
-        {tipologiaFilter.size > 0 && (
-          <Button
-            size="sm"
-            variant="flat"
-            color="danger"
-            className="h-10"
-            onPress={() => setTipologiaFilter(new Set())}
-          >
-            Reset tipologia
-          </Button>
-        )}
-        {(viewMode === 'grouped' || viewMode === 'manutenzioni') && (
-          <div className="flex gap-2">
-            <Button size="sm" variant="flat" className="h-10" onPress={expandAll}>
-              Espandi tutto
-            </Button>
-            <Button size="sm" variant="flat" className="h-10" onPress={collapseAll}>
-              Comprimi tutto
-            </Button>
-          </div>
-        )}
+        <Select
+          aria-label="Filtra per stato registrazione"
+          placeholder="Stato reg."
+          selectionMode="multiple"
+          selectedKeys={statoRegFilter}
+          onSelectionChange={(keys) => setStatoRegFilter(new Set(Array.from(keys as Set<string>)))}
+          className="sm:w-52"
+          variant="bordered"
+          size="sm"
+          classNames={{ trigger: 'h-10 min-h-10' }}
+          renderValue={(items) => {
+            if (items.length === 0) return <span className="text-default-400">Stato reg.</span>;
+            if (items.length === 1) return <span className="truncate">{String(items[0].textValue ?? items[0].key ?? '')}</span>;
+            return <span>{items.length} stati</span>;
+          }}
+        >
+          {STATO_REG_ORDER.map((s) => (
+            <SelectItem key={s} textValue={s}>{s}</SelectItem>
+          ))}
+        </Select>
+        <Button
+          size="sm"
+          variant="flat"
+          color={hasActiveFilters ? 'danger' : 'default'}
+          isDisabled={!hasActiveFilters}
+          className="h-10"
+          startContent={<X className="w-4 h-4" />}
+          onPress={resetFilters}
+        >
+          Reset filtri
+        </Button>
+      </div>
+      {/* Mobile sort selector */}
+      <div className="flex sm:hidden gap-2 mt-2">
+        <Select
+          aria-label="Ordina per"
+          size="sm"
+          variant="bordered"
+          className="flex-1"
+          classNames={{ trigger: 'h-9 min-h-9' }}
+          selectedKeys={[sortDescriptor.column as string]}
+          onSelectionChange={(keys) => {
+            const col = Array.from(keys as Set<string>)[0];
+            if (col) setSortDescriptor((prev) => ({ ...prev, column: col }));
+          }}
+          renderValue={(items) => {
+            const labels: Record<string, string> = { data: 'Data', nr: 'NR', cliente: 'Cliente', rif: 'Rif. Assistenza' };
+            const k = String(items[0]?.key ?? '');
+            return <span>Ordina: {labels[k] || k}</span>;
+          }}
+        >
+          <SelectItem key="data" textValue="Data">Data</SelectItem>
+          <SelectItem key="nr" textValue="NR">NR</SelectItem>
+          <SelectItem key="cliente" textValue="Cliente">Cliente</SelectItem>
+          <SelectItem key="rif" textValue="Rif. Assistenza">Rif. Assistenza</SelectItem>
+        </Select>
+        <Button
+          size="sm"
+          variant="flat"
+          className="h-9"
+          onPress={() =>
+            setSortDescriptor((prev) => ({
+              ...prev,
+              direction: prev.direction === 'ascending' ? 'descending' : 'ascending',
+            }))
+          }
+          aria-label="Inverti ordine"
+        >
+          {sortDescriptor.direction === 'ascending' ? '↑ Asc' : '↓ Desc'}
+        </Button>
       </div>
       </div>
 
-      {/* Stats cards */}
-      <motion.div
-        className="flex gap-1.5 sm:gap-2 flex-wrap"
-        variants={staggerContainer}
-        initial="hidden"
-        animate="visible"
-      >
-        {grouped
-          .filter((g) => viewMode !== 'manutenzioni' || (g.stato !== 'Chiuso' && g.stato !== 'Sospeso'))
-          .map((g) => (
-          <motion.div key={g.stato} variants={fadeInUp}>
-            <Card shadow="sm" className="px-2 py-1 sm:px-3 sm:py-1.5">
-              <div className="text-center">
-                <p className="text-base sm:text-xl font-bold leading-tight" style={{ color: `var(--heroui-${statoRegColor[g.stato] || 'default'})` }}>
-                  {g.items.length}
-                </p>
-                <p className="text-[10px] sm:text-tiny text-default-400 leading-tight">{g.stato}</p>
-              </div>
-            </Card>
-          </motion.div>
-        ))}
-      </motion.div>
-
-      {/* Global view */}
-      {viewMode === 'global' && (
+      {/* Lista globale */}
+      {globalFiltered.length === 0 ? (
         <>
-          {globalFiltered.length === 0 ? (
-            <Card shadow="sm" className="bg-white">
-              <CardBody className="flex flex-col items-center py-10 gap-2">
-                <p className="text-default-400 text-sm">Nessuna assistenza attiva trovata</p>
-                {search && (
-                  <Button size="sm" variant="flat" onPress={() => setSearch('')}>
-                    Resetta ricerca
-                  </Button>
-                )}
-              </CardBody>
-            </Card>
-          ) : (
-            <>
-              {/* Mobile cards */}
-              <motion.div
-                className="flex flex-col gap-2 sm:hidden"
-                variants={staggerContainer}
-                initial="hidden"
-                animate="visible"
-              >
-                {globalSorted.map((a) => (
-                  <AssistenzaMobileCard
-                    key={a.id}
-                    a={a}
-                    isRunning={runningTimerIds.has(a.id)}
-                    statusChip={renderStatusChip(a)}
-                    onOpen={onOpen}
-                  />
-                ))}
-              </motion.div>
-
-              {/* Desktop table */}
-              <Card shadow="sm" className="bg-white hidden sm:block overflow-hidden">
-                <Table
-                  aria-label="Assistenze globali"
-                  removeWrapper
-                  selectionMode="none"
-                  sortDescriptor={sortDescriptor as any}
-                  onSortChange={(d) => setSortDescriptor(d as any)}
-                  classNames={{
-                    th: 'bg-default-50 text-default-600 text-xs uppercase tracking-wider',
-                    td: 'py-2.5',
-                  }}
-                >
-                  <TableHeader>
-                    <TableColumn width={70} align="center">{''}</TableColumn>
-                    <TableColumn key="data" allowsSorting width={110}>{renderHeader('data', 'DATA')}</TableColumn>
-                    <TableColumn key="nr" allowsSorting width={90}>{renderHeader('nr', 'NR')}</TableColumn>
-                    <TableColumn key="cliente" allowsSorting minWidth={120}>{renderHeader('cliente', 'CLIENTE')}</TableColumn>
-                    <TableColumn minWidth={120}>{renderHeader('tipologia', 'TIPOLOGIA')}</TableColumn>
-                    <TableColumn key="rif" allowsSorting minWidth={100}>{renderHeader('rif', 'RIF. ASSISTENZA')}</TableColumn>
-                    <TableColumn width={130}>{renderHeader('statoreg', 'STATO REG')}</TableColumn>
-                    <TableColumn minWidth={90}>{renderHeader('attne', 'ATT.NE')}</TableColumn>
-                    <TableColumn minWidth={150}>{renderHeader('descrizione', 'DESCRIZIONE')}</TableColumn>
-                  </TableHeader>
-                  <TableBody>
-                    {globalSorted.map((a) => (
-                      <TableRow key={a.id} className={`transition-colors ${runningTimerIds.has(a.id) ? '!bg-[#fff8e8] hover:!bg-[#fdedc7]' : 'hover:bg-default-50'}`}>
-                        <TableCell>
-                          <div className="flex gap-1">
-                            <Button size="sm" color="primary" variant="flat" onPress={() => onOpen(a)}>Apri</Button>
-                            <MapButton address={a.indirizzoAssistenza} />
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-sm text-default-600">{formatDate(a.data)}</span>
-                        </TableCell>
-                        <TableCell>
-                          <span className="font-mono text-xs text-white bg-centoraggi-teal px-2 py-0.5 rounded">
-                            {a.nr}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-sm font-medium">{a.clienteNome || '—'}</span>
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-sm text-default-600">{a.tipologiaAssistenza || '—'}</span>
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-sm font-medium">{a.rifAssistenzaNome || '—'}</span>
-                        </TableCell>
-                        <TableCell>
-                          {renderStatusChip(a)}
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-sm">{a.attne || '—'}</span>
-                        </TableCell>
-                        <TableCell>
-                          <p className="text-sm text-default-600 truncate max-w-[260px]" title={a.descrizioneIntervento}>{a.descrizioneIntervento || '—'}</p>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </Card>
-            </>
-          )}
-        </>
-      )}
-
-      {/* Grouped view */}
-      {viewMode === 'grouped' && (
-        grouped.length === 0 ? (
-        <Card shadow="sm" className="bg-white">
-          <CardBody className="flex flex-col items-center py-10 gap-2">
-            <p className="text-default-400 text-sm">Nessuna registrazione trovata</p>
-            {search && (
-              <Button size="sm" variant="flat" onPress={() => setSearch('')}>
-                Resetta ricerca
-              </Button>
-            )}
-          </CardBody>
-        </Card>
-      ) : (
-        grouped.map((group) => {
-          const isExpanded = expandedGroups.has(group.stato);
-          const color = statoRegColor[group.stato] || 'default';
-          const Icon = statoRegIcon[group.stato] || FileText;
-
-          return (
-            <Card key={group.stato} shadow="sm" className="bg-white overflow-hidden">
-              {/* Collapsible header */}
-              <button
-                type="button"
-                onClick={() => toggleGroup(group.stato)}
-                className="w-full flex items-center justify-between px-4 py-3 sm:px-5 sm:py-4 hover:bg-default-50 transition-colors cursor-pointer text-left"
-              >
-                <div className="flex items-center gap-3">
-                  <Icon className="w-5 h-5 text-default-500" />
-                  <div>
-                    <span className="font-semibold text-foreground text-sm sm:text-base">{group.stato}</span>
-                    <Chip size="sm" variant="flat" color={color} className="ml-2">
-                      {group.items.length}
-                    </Chip>
-                  </div>
-                </div>
-                <ChevronDown
-                  className={`w-5 h-5 text-default-400 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
-                />
-              </button>
-
-              {/* Expanded content */}
-              <AnimatePresence initial={false}>
-                {isExpanded && (
-                  <motion.div
-                    key="content"
-                    variants={collapsibleSection}
-                    initial="hidden"
-                    animate="visible"
-                    exit="hidden"
-                    className="overflow-hidden"
-                  >
-                  {group.items.length === 0 ? (
-                    <div className="px-4 py-8 text-center text-default-400 text-sm">
-                      Non ci sono assistenze in questo stato
-                    </div>
-                  ) : (
-                  <>
-                  {/* Mobile cards */}
-                  <div className="flex flex-col gap-1.5 p-2 sm:hidden">
-                    {group.items.map((a) => (
-                      <div
-                        key={a.id}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => onOpen(a)}
-                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(a); } }}
-                        className={`rounded-lg p-2 border cursor-pointer active:bg-default-100 ${runningTimerIds.has(a.id) ? 'bg-[#fff8e8] border-warning/30' : 'border-default-200'}`}
-                      >
-                        <div className="flex justify-between items-center gap-2">
-                          <div className="min-w-0 flex items-center gap-1.5 flex-wrap">
-                            <span className="font-mono text-[11px] text-white bg-centoraggi-teal px-1.5 py-0.5 rounded">
-                              {a.nr}
-                            </span>
-                            <span className="text-sm font-medium truncate">{a.rifAssistenzaNome || a.clienteNome || '—'}</span>
-                          </div>
-                          <div className="flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-                            <MapButton address={a.indirizzoAssistenza} />
-                            {renderStatusChip(a)}
-                          </div>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-default-600 mt-1">
-                          <span className="tabular-nums">{formatDate(a.data)}</span>
-                          {a.clienteNome && <span className="truncate max-w-[60%]">{a.clienteNome}</span>}
-                          {a.tipologiaAssistenza && <span className="truncate max-w-[60%] text-default-500">{a.tipologiaAssistenza}</span>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Desktop table */}
-                  <div className="hidden sm:block">
-                    <Table
-                      aria-label={`Registrazioni ${group.stato}`}
-                      removeWrapper
-                      selectionMode="none"
-                      sortDescriptor={sortDescriptor as any}
-                      onSortChange={(d) => setSortDescriptor(d as any)}
-                      classNames={{
-                        th: 'bg-default-50 text-default-600 text-xs uppercase tracking-wider',
-                        td: 'py-2.5',
-                      }}
-                    >
-                      <TableHeader>
-                        <TableColumn width={70} align="center">{''}</TableColumn>
-                        <TableColumn key="data" allowsSorting width={110}>{renderHeader('data', 'DATA')}</TableColumn>
-                        <TableColumn key="nr" allowsSorting width={90}>{renderHeader('nr', 'NR')}</TableColumn>
-                        <TableColumn key="cliente" allowsSorting minWidth={120}>{renderHeader('cliente', 'CLIENTE')}</TableColumn>
-                        <TableColumn minWidth={120}>{renderHeader('tipologia', 'TIPOLOGIA')}</TableColumn>
-                        <TableColumn key="rif" allowsSorting minWidth={100}>{renderHeader('rif', 'RIF. ASSISTENZA')}</TableColumn>
-                        <TableColumn minWidth={90}>{renderHeader('attne', 'ATT.NE')}</TableColumn>
-                        <TableColumn minWidth={150}>{renderHeader('descrizione', 'DESCRIZIONE')}</TableColumn>
-                      </TableHeader>
-                      <TableBody>
-                        {sortItems(group.items).map((a) => (
-                          <TableRow key={a.id} className={`transition-colors ${runningTimerIds.has(a.id) ? '!bg-[#fff8e8] hover:!bg-[#fdedc7]' : 'hover:bg-default-50'}`}>
-                            <TableCell>
-                              <div className="flex gap-1">
-                                <Button size="sm" color="primary" variant="flat" onPress={() => onOpen(a)}>Apri</Button>
-                                <MapButton address={a.indirizzoAssistenza} />
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              <span className="text-sm text-default-600">{formatDate(a.data)}</span>
-                            </TableCell>
-                            <TableCell>
-                              <span className="font-mono text-xs text-white bg-centoraggi-teal px-2 py-0.5 rounded">
-                                {a.nr}
-                              </span>
-                            </TableCell>
-                            <TableCell>
-                              <span className="text-sm font-medium">{a.clienteNome || '—'}</span>
-                            </TableCell>
-                            <TableCell>
-                              <span className="text-sm text-default-600">{a.tipologiaAssistenza || '—'}</span>
-                            </TableCell>
-                            <TableCell>
-                              <span className="text-sm font-medium">{a.rifAssistenzaNome || '—'}</span>
-                            </TableCell>
-                            <TableCell>
-                              <span className="text-sm">{a.attne || '—'}</span>
-                            </TableCell>
-                            <TableCell>
-                              <p className="text-sm text-default-600 truncate max-w-[260px]" title={a.descrizioneIntervento}>{a.descrizioneIntervento || '—'}</p>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                  </>
-                  )}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </Card>
-          );
-        })
-      ))}
-      {/* Manutenzioni Programmate view */}
-      {viewMode === 'manutenzioni' && (
-        manutenzioniGrouped.every(g => g.items.length === 0) ? (
-          <Card shadow="sm" className="bg-white">
+          {/* Mobile empty state */}
+          <Card shadow="sm" className="bg-white sm:hidden">
             <CardBody className="flex flex-col items-center py-10 gap-2">
-              <p className="text-default-400 text-sm">Nessuna manutenzione trovata</p>
-              {search && (
-                <Button size="sm" variant="flat" onPress={() => setSearch('')}>
-                  Resetta ricerca
+              <p className="text-default-400 text-sm">Nessuna assistenza trovata</p>
+              {hasActiveFilters && (
+                <Button size="sm" variant="flat" onPress={resetFilters}>
+                  Reset filtri
                 </Button>
               )}
             </CardBody>
           </Card>
-        ) : (
-          manutenzioniGrouped.map((group) => {
-            const isExpanded = expandedGroups.has(group.stato);
-            const color = statoRegColor[group.stato] || 'default';
-            const Icon = statoRegIcon[group.stato] || FileText;
 
-            return (
-              <Card key={group.stato} shadow="sm" className="bg-white overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => toggleGroup(group.stato)}
-                  className="w-full flex items-center justify-between px-4 py-3 sm:px-5 sm:py-4 hover:bg-default-50 transition-colors cursor-pointer text-left"
-                >
-                  <div className="flex items-center gap-3">
-                    <Icon className="w-5 h-5 text-default-500" />
-                    <div>
-                      <span className="font-semibold text-foreground text-sm sm:text-base">{group.stato}</span>
-                      <Chip size="sm" variant="flat" color={color} className="ml-2">
-                        {group.items.length}
-                      </Chip>
-                    </div>
-                  </div>
-                  <ChevronDown
-                    className={`w-5 h-5 text-default-400 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
-                  />
-                </button>
+          {/* Desktop: mantieni intestazione tabella */}
+          <Card shadow="sm" className="bg-white hidden sm:block overflow-hidden">
+            <Table
+              aria-label="Assistenze globali (vuota)"
+              removeWrapper
+              selectionMode="none"
+              sortDescriptor={sortDescriptor as any}
+              onSortChange={(d) => setSortDescriptor(d as any)}
+              classNames={{
+                th: 'bg-default-50 text-default-600 text-xs uppercase tracking-wider text-left align-top py-2',
+                td: 'py-2.5',
+              }}
+            >
+              <TableHeader>
+                <TableColumn width={70}>{''}</TableColumn>
+                <TableColumn key="data" allowsSorting width={110}>{renderHeader('data', 'DATA', { inputType: 'date' })}</TableColumn>
+                <TableColumn key="nr" allowsSorting width={90}>{renderHeader('nr', 'NR')}</TableColumn>
+                <TableColumn key="cliente" allowsSorting minWidth={120}>{renderHeader('cliente', 'CLIENTE', { choices: clienteOptions, selected: clienteFilter, onChange: setClienteFilter, searchable: true })}</TableColumn>
+                <TableColumn minWidth={120}>{renderHeader('tipologia', 'TIPOLOGIA', { choices: tipologiaOptions, selected: tipologiaFilter, onChange: setTipologiaFilter })}</TableColumn>
+                <TableColumn key="rif" allowsSorting minWidth={100}>{renderHeader('rif', 'RIF. ASSISTENZA')}</TableColumn>
+                <TableColumn width={130}>{renderHeader('statoreg', 'STATO REG', { choices: STATO_REG_ORDER, selected: statoRegFilter, onChange: setStatoRegFilter })}</TableColumn>
+                <TableColumn minWidth={90}>{renderHeader('attne', 'ATT.NE')}</TableColumn>
+                <TableColumn minWidth={150}>{renderHeader('descrizione', 'DESCRIZIONE')}</TableColumn>
+              </TableHeader>
+              <TableBody emptyContent={
+                <div className="flex flex-col items-center gap-2 py-10">
+                  <p className="text-default-400 text-sm">Nessuna assistenza trovata</p>
+                  {hasActiveFilters && (
+                    <Button size="sm" variant="flat" onPress={resetFilters} startContent={<X className="w-4 h-4" />}>
+                      Reset filtri
+                    </Button>
+                  )}
+                </div>
+              }>
+                {[]}
+              </TableBody>
+            </Table>
+          </Card>
+        </>
+      ) : (
+        <>
+          {/* Mobile cards */}
+          <motion.div
+            className="flex flex-col gap-2 sm:hidden"
+            variants={staggerContainer}
+            initial="hidden"
+            animate="visible"
+          >
+            {globalSorted.map((a) => (
+              <AssistenzaMobileCard
+                key={a.id}
+                a={a}
+                isRunning={runningTimerIds.has(a.id)}
+                statusChip={renderStatusChip(a)}
+                onOpen={onOpen}
+              />
+            ))}
+          </motion.div>
 
-                <AnimatePresence initial={false}>
-                {isExpanded && (
-                  <motion.div
-                    key="content"
-                    variants={collapsibleSection}
-                    initial="hidden"
-                    animate="visible"
-                    exit="hidden"
-                    className="overflow-hidden"
-                  >
-                    {group.items.length === 0 ? (
-                      <div className="px-4 py-8 text-center text-default-400 text-sm">
-                        Non ci sono assistenze in questo stato
+          {/* Desktop table */}
+          <Card shadow="sm" className="bg-white hidden sm:block overflow-hidden">
+            <Table
+              aria-label="Assistenze globali"
+              removeWrapper
+              selectionMode="none"
+              sortDescriptor={sortDescriptor as any}
+              onSortChange={(d) => setSortDescriptor(d as any)}
+              classNames={{
+                th: 'bg-default-50 text-default-600 text-xs uppercase tracking-wider text-left align-top py-2',
+                td: 'py-2.5',
+              }}
+            >
+              <TableHeader>
+                <TableColumn width={70}>{''}</TableColumn>
+                <TableColumn key="data" allowsSorting width={110}>{renderHeader('data', 'DATA', { inputType: 'date' })}</TableColumn>
+                <TableColumn key="nr" allowsSorting width={90}>{renderHeader('nr', 'NR')}</TableColumn>
+                <TableColumn key="cliente" allowsSorting minWidth={120}>{renderHeader('cliente', 'CLIENTE', { choices: clienteOptions, selected: clienteFilter, onChange: setClienteFilter, searchable: true })}</TableColumn>
+                <TableColumn minWidth={120}>{renderHeader('tipologia', 'TIPOLOGIA', { choices: tipologiaOptions, selected: tipologiaFilter, onChange: setTipologiaFilter })}</TableColumn>
+                <TableColumn key="rif" allowsSorting minWidth={100}>{renderHeader('rif', 'RIF. ASSISTENZA')}</TableColumn>
+                <TableColumn width={130}>{renderHeader('statoreg', 'STATO REG', { choices: STATO_REG_ORDER, selected: statoRegFilter, onChange: setStatoRegFilter })}</TableColumn>
+                <TableColumn minWidth={90}>{renderHeader('attne', 'ATT.NE')}</TableColumn>
+                <TableColumn minWidth={150}>{renderHeader('descrizione', 'DESCRIZIONE')}</TableColumn>
+              </TableHeader>
+              <TableBody>
+                {globalSorted.map((a) => (
+                  <TableRow key={a.id} className={`transition-colors ${runningTimerIds.has(a.id) ? '!bg-[#fff8e8] hover:!bg-[#fdedc7]' : 'hover:bg-default-50'}`}>
+                    <TableCell>
+                      <div className="flex gap-1">
+                        <Button size="sm" color="primary" variant="flat" onPress={() => onOpen(a)}>Apri</Button>
+                        <MapButton address={a.indirizzoAssistenza} />
                       </div>
-                    ) : (
-                    <>
-                    {/* Mobile cards */}
-                    <div className="flex flex-col gap-1.5 p-2 sm:hidden">
-                      {group.items.map((a) => (
-                        <div
-                          key={a.id}
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => onOpen(a)}
-                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(a); } }}
-                          className={`rounded-lg p-2 border cursor-pointer active:bg-default-100 ${runningTimerIds.has(a.id) ? 'bg-[#fff8e8] border-warning/30' : 'border-default-200'}`}
-                        >
-                          <div className="flex justify-between items-center gap-2">
-                            <div className="min-w-0 flex items-center gap-1.5 flex-wrap">
-                              <span className="font-mono text-[11px] text-white bg-centoraggi-teal px-1.5 py-0.5 rounded">
-                                {a.nr}
-                              </span>
-                              <span className="text-sm font-medium truncate">{a.rifAssistenzaNome || a.clienteNome || '—'}</span>
-                            </div>
-                            <div className="flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-                              <MapButton address={a.indirizzoAssistenza} />
-                              {renderStatusChip(a)}
-                            </div>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-default-600 mt-1">
-                            <span className="tabular-nums">{formatDate(a.data)}</span>
-                            {a.clienteNome && <span className="truncate max-w-[60%]">{a.clienteNome}</span>}
-                            {a.tipologiaAssistenza && <span className="truncate max-w-[60%] text-default-500">{a.tipologiaAssistenza}</span>}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Desktop table */}
-                    <div className="hidden sm:block">
-                      <Table
-                        aria-label={`Manutenzioni ${group.stato}`}
-                        removeWrapper
-                        selectionMode="none"
-                        sortDescriptor={sortDescriptor as any}
-                        onSortChange={(d) => setSortDescriptor(d as any)}
-                        classNames={{
-                          th: 'bg-default-50 text-default-600 text-xs uppercase tracking-wider',
-                          td: 'py-2.5',
-                        }}
-                      >
-                        <TableHeader>
-                          <TableColumn width={70} align="center">{''}</TableColumn>
-                          <TableColumn key="data" allowsSorting width={110}>{renderHeader('data', 'DATA')}</TableColumn>
-                          <TableColumn key="nr" allowsSorting width={90}>{renderHeader('nr', 'NR')}</TableColumn>
-                          <TableColumn key="cliente" allowsSorting minWidth={120}>{renderHeader('cliente', 'CLIENTE')}</TableColumn>
-                          <TableColumn minWidth={120}>{renderHeader('tipologia', 'TIPOLOGIA')}</TableColumn>
-                          <TableColumn key="rif" allowsSorting minWidth={100}>{renderHeader('rif', 'RIF. ASSISTENZA')}</TableColumn>
-                          <TableColumn minWidth={90}>{renderHeader('attne', 'ATT.NE')}</TableColumn>
-                          <TableColumn minWidth={150}>{renderHeader('descrizione', 'DESCRIZIONE')}</TableColumn>
-                        </TableHeader>
-                        <TableBody>
-                          {sortItems(group.items).map((a) => (
-                            <TableRow key={a.id} className={`transition-colors ${runningTimerIds.has(a.id) ? '!bg-[#fff8e8] hover:!bg-[#fdedc7]' : 'hover:bg-default-50'}`}>
-                              <TableCell>
-                                <div className="flex gap-1">
-                                  <Button size="sm" color="primary" variant="flat" onPress={() => onOpen(a)}>Apri</Button>
-                                  <MapButton address={a.indirizzoAssistenza} />
-                                </div>
-                              </TableCell>
-                              <TableCell>
-                                <span className="text-sm text-default-600">{formatDate(a.data)}</span>
-                              </TableCell>
-                              <TableCell>
-                                <span className="font-mono text-xs text-white bg-centoraggi-teal px-2 py-0.5 rounded">
-                                  {a.nr}
-                                </span>
-                              </TableCell>
-                              <TableCell>
-                                <span className="text-sm font-medium">{a.clienteNome || '—'}</span>
-                              </TableCell>
-                              <TableCell>
-                                <span className="text-sm text-default-600">{a.tipologiaAssistenza || '—'}</span>
-                              </TableCell>
-                              <TableCell>
-                                <span className="text-sm font-medium">{a.rifAssistenzaNome || '—'}</span>
-                              </TableCell>
-                              <TableCell>
-                                <span className="text-sm">{a.attne || '—'}</span>
-                              </TableCell>
-                              <TableCell>
-                                <p className="text-sm text-default-600 truncate max-w-[260px]" title={a.descrizioneIntervento}>{a.descrizioneIntervento || '—'}</p>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                    </>
-                    )}
-                  </motion.div>
-                )}
-                </AnimatePresence>
-              </Card>
-            );
-          })
-        )
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-sm text-default-600">{formatDate(a.data)}</span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="font-mono text-xs text-white bg-centoraggi-teal px-2 py-0.5 rounded">
+                        {a.nr}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-sm font-medium">{a.clienteNome || '—'}</span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-sm text-default-600">{a.tipologiaAssistenza || '—'}</span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-sm font-medium">{a.rifAssistenzaNome || '—'}</span>
+                    </TableCell>
+                    <TableCell>
+                      {renderStatusChip(a)}
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-sm">{a.attne || '—'}</span>
+                    </TableCell>
+                    <TableCell>
+                      <p className="text-sm text-default-600 truncate max-w-[260px]" title={a.descrizioneIntervento}>{a.descrizioneIntervento || '—'}</p>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Card>
+        </>
       )}
+
       {/* Pagination controls */}
       {!allLoaded && (
         <>

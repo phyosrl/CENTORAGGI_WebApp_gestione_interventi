@@ -23,9 +23,19 @@ const tid = process.env.DATAVERSE_TENANT_ID;
     { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
   );
   const token = tokenRes.data.access_token;
-  // Lookups on phyo_assistenze (rif)
-  const u4 = `${u}/api/data/v9.2/EntityDefinitions(LogicalName='phyo_assistenze')/ManyToOneRelationships?$select=ReferencingEntityNavigationPropertyName,ReferencedEntity,ReferencingAttribute`;
-  const r4 = await axios.get(u4, { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' } });
-  console.log('=== phyo_assistenze ManyToOne ===');
-  for (const rel of r4.data.value) console.log(rel.ReferencingAttribute, '->', rel.ReferencingEntityNavigationPropertyName, '(target:', rel.ReferencedEntity + ')');
+  // Trova tutte le entity definitions phyo_*
+  const uList = `${u}/api/data/v9.2/EntityDefinitions?$select=LogicalName,LogicalCollectionName,SchemaName`;
+  const rList = await axios.get(uList, { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' } });
+  console.log('=== Entity definitions phyo_assist* ===');
+  for (const e of rList.data.value) {
+    if (e.LogicalName && e.LogicalName.startsWith('phyo_assist')) {
+      console.log(e.LogicalName, '| collection:', e.LogicalCollectionName, '| schema:', e.SchemaName);
+    }
+  }
+
+  // Tutti gli attributi della tabella phyo_assistenzeregistrazioni
+  const uAttr = `${u}/api/data/v9.2/EntityDefinitions(LogicalName='phyo_assistenzeregistrazioni')/Attributes?$select=LogicalName,AttributeType`;
+  const rAttr = await axios.get(uAttr, { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' } });
+  console.log('=== phyo_assistenzeregistrazioni attributi (logical name) ===');
+  for (const a of rAttr.data.value) console.log(a.LogicalName, '(', a.AttributeType, ')');
 })().catch(e => { console.error('ERR', e?.response?.data || e?.message || e); process.exit(1); });

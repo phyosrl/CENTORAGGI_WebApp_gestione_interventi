@@ -46,7 +46,9 @@ function isOfflineOrNetworkError(error: unknown): boolean {
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
-    if (typeof window !== 'undefined' && error?.response?.status === 401) {
+    const reqUrl = (error?.config?.url ?? '') as string;
+    const isAuthLogin = /\/auth\/login(\?|$)/.test(reqUrl);
+    if (typeof window !== 'undefined' && error?.response?.status === 401 && !isAuthLogin) {
       sessionStorage.removeItem(STORAGE_KEY);
       window.dispatchEvent(new CustomEvent('auth:expired'));
       return Promise.reject(error);
@@ -119,11 +121,13 @@ export interface PaginatedAssistenzeResponse {
 
 export async function fetchAssistenzeRegistrazioni(
   risorsaId: string,
-  options?: { pageSize?: number; skipToken?: string }
+  options?: { pageSize?: number; skipToken?: string; from?: string; to?: string }
 ): Promise<PaginatedAssistenzeResponse> {
   const params: Record<string, string> = { risorsaId };
   if (options?.pageSize) params.pageSize = String(options.pageSize);
   if (options?.skipToken) params.skipToken = options.skipToken;
+  if (options?.from) params.from = options.from;
+  if (options?.to) params.to = options.to;
 
   const { data } = await api.get<{
     success: boolean;
@@ -272,6 +276,47 @@ export async function uploadImage(
 
 export async function deleteImage(annotationId: string): Promise<void> {
   await api.delete(`/dataverse/annotations/${annotationId}`);
+}
+
+// --- SharePoint Files ---
+
+export interface SharepointFile {
+  id: string;
+  name: string;
+  size: number;
+  mimetype: string | null;
+  webUrl: string;
+  downloadUrl: string | null;
+  createdDateTime: string;
+}
+
+export async function fetchSharepointFiles(registrazioneId: string): Promise<SharepointFile[]> {
+  const { data } = await api.get<{ success: boolean; data: SharepointFile[] }>(
+    `/dataverse/assistenze/${registrazioneId}/sharepoint-files`
+  );
+  return data.data;
+}
+
+export async function uploadSharepointFile(
+  registrazioneId: string,
+  filename: string,
+  mimetype: string,
+  documentbody: string,
+): Promise<{ fileId: string; webUrl: string; folderWebUrl: string }> {
+  const { data } = await api.post<{
+    success: boolean;
+    fileId: string;
+    webUrl: string;
+    folderWebUrl: string;
+  }>(
+    `/dataverse/assistenze/${registrazioneId}/sharepoint-files`,
+    { filename, mimetype, documentbody },
+  );
+  return { fileId: data.fileId, webUrl: data.webUrl, folderWebUrl: data.folderWebUrl };
+}
+
+export async function deleteSharepointFile(registrazioneId: string, itemId: string): Promise<void> {
+  await api.delete(`/dataverse/assistenze/${registrazioneId}/sharepoint-files/${encodeURIComponent(itemId)}`);
 }
 
 // --- Geocoding (proxy backend → Nominatim) ---

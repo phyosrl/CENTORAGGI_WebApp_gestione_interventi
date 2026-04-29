@@ -1,6 +1,11 @@
 @import "tailwindcss";
 @config "../tailwind.config.js";
 
+/* Global font: Poppins */
+html, body, #root {
+  font-family: 'Poppins', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
 /* Global blue borders — token: --centoraggi-accent === centoraggi.accent (#6096BA) */
 :root {
   --centoraggi-accent: #6096BA;

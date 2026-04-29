@@ -1,14 +1,18 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Card, CardBody, Button, addToast } from '@heroui/react';
-import { Eraser, Save, Pencil, Trash2, CheckCircle2 } from 'lucide-react';
-import { uploadImage, deleteImage, type Annotation } from '../../services/api';
+import { Eraser, Pencil, Trash2, CheckCircle2, Loader2 } from 'lucide-react';
+import {
+  uploadSharepointFile,
+  deleteSharepointFile,
+  type SharepointFile,
+} from '../../services/api';
 
-export const SIGNATURE_SUBJECT = 'firma_cliente';
+export const SIGNATURE_FILENAME = 'firma_cliente.png';
 
 interface SignatureWidgetProps {
   registrazioneId?: string; // undefined in create mode
   isCreate: boolean;
-  existingSignature?: Annotation | null;
+  existingSignature?: SharepointFile | null;
   pendingSignature: string | null; // base64 (no prefix) staged for create mode
   onPendingChange: (base64: string | null) => void;
   onSaved?: () => void; // called after successful upload/delete to refresh
@@ -28,9 +32,17 @@ export default function SignatureWidget({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawingRef = useRef(false);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const existingSignatureRef = useRef<SharepointFile | null | undefined>(existingSignature);
   const [hasStrokes, setHasStrokes] = useState(false);
   const [editing, setEditing] = useState(isCreate || !existingSignature);
   const [busy, setBusy] = useState(false);
+  const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'pending' | 'saving' | 'saved' | 'error'>('idle');
+
+  // Keep ref in sync with prop so the debounced callback uses the latest value
+  useEffect(() => {
+    existingSignatureRef.current = existingSignature;
+  }, [existingSignature]);
 
   // Setup canvas size and style
   const initCanvas = useCallback(() => {
@@ -108,10 +120,16 @@ export default function SignatureWidget({
     } catch {
       // ignore
     }
+    if (hasStrokes) scheduleAutoSave();
   };
 
   const handleClear = () => {
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
     initCanvas();
+    setAutoSaveStatus('idle');
     if (isCreate) onPendingChange(null);
   };
 
@@ -122,55 +140,72 @@ export default function SignatureWidget({
     return dataUrl.split(',')[1] || null;
   };
 
-  const handleSave = async () => {
-    if (!hasStrokes) {
-      addToast({ title: 'Firma vuota', description: 'Disegna la firma prima di salvare', color: 'warning' });
-      return;
-    }
-    const base64 = exportBase64();
-    if (!base64) return;
-
-    if (isCreate) {
-      onPendingChange(base64);
-      addToast({ title: 'Firma pronta', description: 'Verrà salvata alla creazione', color: 'success' });
-      return;
-    }
-
-    if (!registrazioneId) return;
-
-    setBusy(true);
-    try {
-      // Replace any existing signature
-      if (existingSignature) {
-        await deleteImage(existingSignature.annotationid);
+  // Debounced auto-save invoked after each pointer release while drawing.
+  // - Create mode: stages the base64 in the parent (onPendingChange) so it is
+  //   uploaded together with the new record on form submit.
+  // - Edit mode: uploads to SharePoint immediately (replacing any existing
+  //   signature file).
+  const scheduleAutoSave = useCallback(() => {
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    setAutoSaveStatus('pending');
+    autoSaveTimerRef.current = setTimeout(async () => {
+      const base64 = exportBase64();
+      if (!base64) {
+        setAutoSaveStatus('idle');
+        return;
       }
-      await uploadImage(
-        registrazioneId,
-        'firma_cliente.png',
-        'image/png',
-        base64,
-        SIGNATURE_SUBJECT,
-      );
-      addToast({ title: 'Firma salvata', description: 'Firma cliente acquisita', color: 'success' });
-      setEditing(false);
-      onSaved?.();
-    } catch {
-      addToast({ title: 'Errore', description: 'Salvataggio firma fallito', color: 'danger' });
-    } finally {
-      setBusy(false);
-    }
-  };
+      if (isCreate) {
+        onPendingChange(base64);
+        setAutoSaveStatus('saved');
+        return;
+      }
+      if (!registrazioneId) {
+        setAutoSaveStatus('idle');
+        return;
+      }
+      setAutoSaveStatus('saving');
+      setBusy(true);
+      try {
+        const current = existingSignatureRef.current;
+        if (current) {
+          await deleteSharepointFile(registrazioneId, current.id);
+        }
+        await uploadSharepointFile(
+          registrazioneId,
+          SIGNATURE_FILENAME,
+          'image/png',
+          base64,
+        );
+        setAutoSaveStatus('saved');
+        onSaved?.();
+      } catch (err: any) {
+        const msg = err?.response?.data?.error || err?.message || 'Salvataggio firma fallito';
+        addToast({ title: 'Errore firma', description: msg, color: 'danger' });
+        setAutoSaveStatus('error');
+      } finally {
+        setBusy(false);
+      }
+    }, 900);
+  }, [isCreate, registrazioneId, onPendingChange, onSaved]);
+
+  // Cancel pending auto-save on unmount
+  useEffect(() => {
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+  }, []);
 
   const handleDelete = async () => {
     if (!existingSignature || !registrazioneId) return;
     setBusy(true);
     try {
-      await deleteImage(existingSignature.annotationid);
+      await deleteSharepointFile(registrazioneId, existingSignature.id);
       addToast({ title: 'Firma rimossa', color: 'success' });
       setEditing(true);
       onSaved?.();
-    } catch {
-      addToast({ title: 'Errore', description: 'Eliminazione fallita', color: 'danger' });
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || err?.message || 'Eliminazione fallita';
+      addToast({ title: 'Errore', description: msg, color: 'danger' });
     } finally {
       setBusy(false);
     }
@@ -210,7 +245,7 @@ export default function SignatureWidget({
           </div>
           <div className="bg-white rounded-lg border border-centoraggi-accent/20 p-2 flex items-center justify-center">
             <img
-              src={`data:${existingSignature.mimetype};base64,${existingSignature.documentbody}`}
+              src={existingSignature.downloadUrl ?? existingSignature.webUrl}
               alt="Firma cliente"
               className="max-h-[200px] object-contain"
             />
@@ -227,7 +262,25 @@ export default function SignatureWidget({
           <p className="text-xs font-semibold text-centoraggi-deep uppercase tracking-wider">
             Firma cliente
           </p>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            {autoSaveStatus === 'saving' && (
+              <span className="inline-flex items-center gap-1 text-[11px] text-default-500">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Salvataggio…
+              </span>
+            )}
+            {autoSaveStatus === 'pending' && (
+              <span className="inline-flex items-center gap-1 text-[11px] text-default-500">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" /> In attesa…
+              </span>
+            )}
+            {autoSaveStatus === 'saved' && (
+              <span className="inline-flex items-center gap-1 text-[11px] text-success-600">
+                <CheckCircle2 className="w-3.5 h-3.5" /> {isCreate ? 'Pronta' : 'Salvata'}
+              </span>
+            )}
+            {autoSaveStatus === 'error' && (
+              <span className="text-[11px] text-danger-600">Errore salvataggio</span>
+            )}
             <Button
               size="sm"
               variant="flat"
@@ -236,16 +289,6 @@ export default function SignatureWidget({
               isDisabled={busy}
             >
               Cancella
-            </Button>
-            <Button
-              size="sm"
-              color="primary"
-              isLoading={busy}
-              startContent={!busy ? <Save className="w-4 h-4" /> : undefined}
-              onPress={handleSave}
-              isDisabled={!hasStrokes}
-            >
-              {isCreate ? 'Conferma firma' : 'Salva firma'}
             </Button>
           </div>
         </div>
@@ -262,7 +305,7 @@ export default function SignatureWidget({
         </div>
 
         <p className="text-[11px] text-default-500">
-          Far firmare il cliente nel riquadro sopra. {isCreate ? 'La firma sarà acquisita al salvataggio della registrazione.' : 'La firma sostituirà quella esistente.'}
+          Far firmare il cliente nel riquadro sopra. {isCreate ? 'La firma sarà acquisita al salvataggio della registrazione.' : 'La firma viene salvata automaticamente.'}
           {pendingSignature && isCreate && (
             <span className="ml-1 text-success-600 font-medium">Firma in attesa di salvataggio.</span>
           )}

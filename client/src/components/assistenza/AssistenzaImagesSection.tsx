@@ -1,7 +1,7 @@
 import React, { memo, useRef } from 'react';
 import { Card, CardBody, Button } from '@heroui/react';
 import { Image as ImageIcon, Camera, Upload, X } from 'lucide-react';
-import type { Annotation } from '../../services/api';
+import type { SharepointFile } from '../../services/api';
 
 export interface LocalPreview {
   file: File;
@@ -10,22 +10,13 @@ export interface LocalPreview {
 
 export interface ImagesSectionProps {
   isCreate: boolean;
-  images: Annotation[] | undefined;
+  images: SharepointFile[] | undefined;
   localPreviews: LocalPreview[];
   uploading: boolean;
   onFileSelect: (files: FileList | null) => void;
   onRemoveLocal: (index: number) => void;
   onUploadAll: () => void;
-  onDeleteRemote: (annotationId: string) => void;
-}
-
-function openImageInNewWindow(mimetype: string, body: string, filename: string) {
-  const w = window.open();
-  if (!w) return;
-  w.document.write(
-    `<img src="data:${mimetype};base64,${body}" style="max-width:100%;max-height:100vh;margin:auto;display:block" />`
-  );
-  w.document.title = filename;
+  onDeleteRemote: (itemId: string) => void;
 }
 
 const AssistenzaImagesSectionImpl: React.FC<ImagesSectionProps> = ({
@@ -116,29 +107,29 @@ const AssistenzaImagesSectionImpl: React.FC<ImagesSectionProps> = ({
           </div>
         )}
 
-        {/* Uploaded images from Dataverse (only in edit mode) */}
+        {/* Uploaded images from SharePoint (only in edit mode) */}
         {!isCreate && images && images.length > 0 && (
           <div>
             <p className="text-xs text-default-400 mb-2">Caricate ({images.length})</p>
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
               {images.map((img) => (
-                <div key={img.annotationid} className="relative group aspect-square rounded-lg overflow-hidden border border-centoraggi-accent/20">
+                <div key={img.id} className="relative group aspect-square rounded-lg overflow-hidden border border-centoraggi-accent/20">
                   <img
-                    src={`data:${img.mimetype};base64,${img.documentbody}`}
-                    alt={img.filename}
+                    src={img.downloadUrl ?? img.webUrl}
+                    alt={img.name}
                     className="w-full h-full object-cover cursor-pointer"
-                    onClick={() => openImageInNewWindow(img.mimetype, img.documentbody, img.filename)}
+                    onClick={() => window.open(img.webUrl, '_blank', 'noopener,noreferrer')}
                   />
                   <button
                     type="button"
-                    onClick={() => onDeleteRemote(img.annotationid)}
+                    onClick={() => onDeleteRemote(img.id)}
                     className="absolute top-1 right-1 w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                     aria-label="Elimina immagine"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
                   <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-[10px] px-1 py-0.5 truncate">
-                    {img.filename}
+                    {img.name}
                   </div>
                 </div>
               ))}

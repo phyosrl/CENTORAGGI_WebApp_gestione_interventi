@@ -60,10 +60,17 @@ export default function ActiveTimersPanel({ onOpenAssistenza }: ActiveTimersPane
                           type="button"
                           onClick={() => onOpenAssistenza(timer.assistenzaId!)}
                           title="Apri dettaglio registrazione"
-                          className="group inline-flex items-center gap-1.5 rounded-full bg-gradient-to-b from-white to-primary-50 border border-primary-200 px-4 py-2 shadow-sm hover:shadow-md hover:from-primary-50 hover:to-primary-100 active:translate-y-px transition-all duration-150 cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary-300"
+                          className={
+                            `group inline-flex items-center gap-1.5 rounded-full px-4 py-1 text-sm font-bold tracking-wide border whitespace-nowrap transition-all duration-150 cursor-pointer focus:outline-none focus:ring-2 ` +
+                            (timer.status === 'running'
+                              ? 'bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-200 focus:ring-emerald-300'
+                              : timer.status === 'paused'
+                                ? 'bg-orange-100 text-orange-700 border-orange-200 hover:bg-orange-200 focus:ring-orange-300'
+                                : 'bg-default-100 text-default-700 border-default-200 hover:bg-default-200 focus:ring-default-300')
+                          }
                         >
-                          <span className="font-mono text-base font-bold text-primary-700">{timer.nr || 'Registrazione'}</span>
-                          <ExternalLink className="w-4 h-4 text-primary-500 group-hover:text-primary-700 transition-colors" />
+                          <span className="font-mono">{timer.nr || 'Registrazione'}</span>
+                          <ExternalLink className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100 transition-opacity" />
                         </button>
                       ) : (
                         <p className="font-mono text-lg font-bold text-foreground truncate">{timer.nr || 'Registrazione'}</p>
@@ -93,13 +100,13 @@ export default function ActiveTimersPanel({ onOpenAssistenza }: ActiveTimersPane
                       <Button
                         size="sm"
                         color="primary"
-                        variant="solid"
-                        className="ml-1 animate-pulse-once"
+                        variant="flat"
+                        className="ml-1 justify-center whitespace-nowrap text-[10px] sm:text-xs font-medium px-1 sm:px-1.5 transition-all duration-150 focus:scale-105 active:scale-95 hover:animate-pulse focus:ring-2 focus:ring-primary-300"
                         onPress={() => {
                           addToast({ title: 'Salvato', color: 'success' });
                         }}
                         aria-label="Salva registrazione"
-                        startContent={<Save className="w-4 h-4" />}
+                        startContent={<Save className="w-3.5 h-3.5" />}
                       >
                         Salva
                       </Button>

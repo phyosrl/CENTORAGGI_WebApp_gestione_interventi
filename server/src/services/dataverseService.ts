@@ -206,19 +206,20 @@ export class DataverseService {
     'phyo_costoorario',
     'phyo_totale',
     'phyo_materialeutilizzato',
-    'phyo_tipologia_assistenza',
+    'phyo_indirizzocliente',
     '_phyo_rifassistenza_value',
     '_phyo_risorsa_value',
-    '_phyo_cliente_value',
     'statecode'
   ];
 
-  async getAssistenze(risorsaId?: string): Promise<any[]> {
-    const filter = risorsaId
-      ? `_phyo_risorsa_value eq ${this.sanitizeGuid(risorsaId)}`
-      : undefined;
+  async getAssistenze(risorsaId?: string, fromISO?: string, toISO?: string): Promise<any[]> {
+    const filters: string[] = [];
+    if (risorsaId) filters.push(`_phyo_risorsa_value eq ${this.sanitizeGuid(risorsaId)}`);
+    if (fromISO) filters.push(`phyo_data ge ${fromISO}`);
+    if (toISO) filters.push(`phyo_data le ${toISO}`);
+    const filter = filters.length > 0 ? filters.join(' and ') : undefined;
 
-    return this.query('phyo_assistenzeregistrazionis', filter, this.assistenzeSelect, undefined, 'phyo_rifassistenza($select=phyo_indirizzoassistenza)');
+    return this.query('phyo_assistenzeregistrazionis', filter, this.assistenzeSelect, undefined, 'phyo_Rifassistenza($select=phyo_indirizzoassistenza)');
   }
 
   async getAssistenzePaged(risorsaId?: string, pageSize?: number, skipToken?: string): Promise<{ data: any[]; totalCount: number; skipToken: string | null }> {
@@ -232,7 +233,7 @@ export class DataverseService {
       orderby: 'phyo_nr desc',
       pageSize,
       skipToken,
-      expand: 'phyo_rifassistenza($select=phyo_indirizzoassistenza)',
+      expand: 'phyo_Rifassistenza($select=phyo_indirizzoassistenza)',
     });
   }
 
@@ -455,5 +456,56 @@ export class DataverseService {
       console.error('deleteAnnotation failed:', error?.response?.data || error?.message);
       throw error;
     }
+  }
+
+  /**
+   * Recupera i dati necessari per costruire il path SharePoint a partire
+   * da una registrazione: tipologia (label), numero assistenza e nome cliente.
+   * Restituisce null se la registrazione non ha un phyo_rifassistenza collegato.
+   */
+  async getSharePointFolderInfo(registrazioneId: string): Promise<
+    | {
+        tipologiaLabel: string;
+        nrAssistenza: string;
+        clienteName: string;
+      }
+    | null
+  > {
+    const token = await this.getAccessToken();
+    const safeId = this.sanitizeGuid(registrazioneId);
+    const url =
+      `/api/data/v9.2/phyo_assistenzeregistrazionis(${safeId})` +
+      `?$select=_phyo_rifassistenza_value` +
+      `&$expand=phyo_Rifassistenza($select=phyo_nrassistenze,phyo_tipologia_assistenza,_phyo_cliente_value)`;
+
+    const response = await this.client.get(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Prefer: 'odata.include-annotations="*"',
+      },
+    });
+
+    const rif = response.data?.phyo_Rifassistenza;
+    if (!rif) return null;
+
+    const tipologiaLabel: string =
+      rif['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue'] || '';
+    const nrAssistenza: string = rif.phyo_nrassistenze || '';
+    const clienteName: string =
+      rif['_phyo_cliente_value@OData.Community.Display.V1.FormattedValue'] || '';
+
+    if (!tipologiaLabel || !nrAssistenza || !clienteName) return null;
+
+    return { tipologiaLabel, nrAssistenza, clienteName };
+  }
+
+  /**
+   * Aggiorna il campo phyo_cartellasharepoint sulla registrazione
+   * con l'URL della cartella SharePoint (utile per aprire la cartella dal CRM).
+   */
+  async setCartellaSharepoint(registrazioneId: string, url: string): Promise<void> {
+    return this.update('phyo_assistenzeregistrazionis', registrazioneId, {
+      phyo_cartellasharepoint: url,
+    });
   }
 }

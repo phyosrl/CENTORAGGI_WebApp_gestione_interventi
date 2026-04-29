@@ -14,13 +14,13 @@ import { AssistenzaRegistrazione, AssistenzaRegistrazioneRaw, mapAssistenzaRegis
 import { getActiveTimers } from './services/timerStore';
 import { getQueueSize, flushQueue } from './services/offlineQueue';
 
-type View = { type: 'calendar' } | { type: 'list' } | { type: 'edit'; assistenza: AssistenzaRegistrazione } | { type: 'create' };
+type View = { type: 'calendar' } | { type: 'list' } | { type: 'storico' } | { type: 'edit'; assistenza: AssistenzaRegistrazione } | { type: 'create' };
 
 function AppContent() {
   const { user, logout } = useAuth();
   const queryClient = useQueryClient();
   const [view, setView] = useState<View>({ type: 'calendar' });
-  const [previousView, setPreviousView] = useState<'calendar' | 'list'>('calendar');
+  const [previousView, setPreviousView] = useState<'calendar' | 'list' | 'storico'>('calendar');
   const [isOnline, setIsOnline] = useState(typeof window === 'undefined' ? true : window.navigator.onLine);
   const [pendingQueue, setPendingQueue] = useState(0);
 
@@ -70,7 +70,7 @@ function AppContent() {
   }, []);
 
   const handleOpen = useCallback((a: AssistenzaRegistrazione) => {
-    setPreviousView((prev) => (view.type === 'calendar' || view.type === 'list' ? view.type : prev));
+    setPreviousView((prev) => (view.type === 'calendar' || view.type === 'list' || view.type === 'storico' ? view.type : prev));
     setView({ type: 'edit', assistenza: a });
   }, [view]);
 
@@ -84,7 +84,7 @@ function AppContent() {
       const raw = list.find((r) => r && r.phyo_assistenzeregistrazioniid === assistenzaId);
       if (raw) {
         const mapped = mapAssistenzaRegistrazione(raw);
-        setPreviousView((prev) => (view.type === 'calendar' || view.type === 'list' ? view.type : prev));
+        setPreviousView((prev) => (view.type === 'calendar' || view.type === 'list' || view.type === 'storico' ? view.type : prev));
         setView({ type: 'edit', assistenza: mapped });
         return;
       }
@@ -92,7 +92,7 @@ function AppContent() {
   }, [queryClient, view]);
 
   const handleCreateNew = useCallback(() => {
-    setPreviousView((prev) => (view.type === 'calendar' || view.type === 'list' ? view.type : prev));
+    setPreviousView((prev) => (view.type === 'calendar' || view.type === 'list' || view.type === 'storico' ? view.type : prev));
     setView({ type: 'create' });
   }, [view]);
 
@@ -108,6 +108,11 @@ function AppContent() {
   const handleShowList = useCallback(() => {
     setPreviousView('list');
     setView({ type: 'list' });
+  }, []);
+
+  const handleShowStorico = useCallback(() => {
+    setPreviousView('storico');
+    setView({ type: 'storico' });
   }, []);
 
   if (!user) {
@@ -170,7 +175,7 @@ function AppContent() {
             size="sm"
             variant={view.type === 'calendar' ? 'solid' : 'flat'}
             color={view.type === 'calendar' ? 'primary' : undefined}
-            className="hidden sm:inline-flex min-w-[88px]"
+            className={`hidden sm:inline-flex min-w-[88px] ${view.type === 'calendar' ? '' : 'bg-white/15 text-white hover:bg-white/25'}`}
             onPress={handleShowCalendar}
           >
             Calendario
@@ -179,10 +184,19 @@ function AppContent() {
             size="sm"
             variant={view.type === 'list' ? 'solid' : 'flat'}
             color={view.type === 'list' ? 'primary' : undefined}
-            className="hidden sm:inline-flex min-w-[88px]"
+            className={`hidden sm:inline-flex min-w-[88px] ${view.type === 'list' ? '' : 'bg-white/15 text-white hover:bg-white/25'}`}
             onPress={handleShowList}
           >
             Elenco
+          </Button>
+          <Button
+            size="sm"
+            variant={view.type === 'storico' ? 'solid' : 'flat'}
+            color={view.type === 'storico' ? 'primary' : undefined}
+            className={`hidden sm:inline-flex min-w-[88px] ${view.type === 'storico' ? '' : 'bg-white/15 text-white hover:bg-white/25'}`}
+            onPress={handleShowStorico}
+          >
+            Storico
           </Button>
           <div className="hidden md:block text-right">
             <p className="text-sm font-medium text-white">Ciao, {user.nome}!</p>
@@ -215,6 +229,16 @@ function AppContent() {
           onPress={handleShowList}
         >
           Elenco
+        </Button>
+        <Button
+          size="sm"
+          fullWidth
+          variant={view.type === 'storico' ? 'solid' : 'flat'}
+          color={view.type === 'storico' ? 'primary' : undefined}
+          className={view.type === 'storico' ? '' : 'bg-white/15 text-white'}
+          onPress={handleShowStorico}
+        >
+          Storico
         </Button>
       </div>
 
@@ -250,6 +274,22 @@ function AppContent() {
               transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
             >
               <AssistenzeList risorsaId={user.id} onOpen={handleOpen} onCreateNew={handleCreateNew} />
+            </motion.div>
+          ) : view.type === 'storico' ? (
+            <motion.div
+              key="storico"
+              initial={{ opacity: 0, x: -24 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 24 }}
+              transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <AssistenzeList
+                risorsaId={user.id}
+                onOpen={handleOpen}
+                onCreateNew={handleCreateNew}
+                title="Storico registrazioni"
+                defaultStatoFilter={['Chiuso', 'Sospeso']}
+              />
             </motion.div>
           ) : (
             <motion.div
