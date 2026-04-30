@@ -431,6 +431,75 @@ export class SharePointService {
     );
   }
 
+  /**
+   * Converte un docx in PDF tramite Microsoft Graph.
+   * Carica il file in una cartella temporanea (`_report_tmp`), richiede la
+   * conversione `?format=pdf` e poi cancella il file temporaneo.
+   */
+  async convertDocxToPdf(docxBuffer: Buffer, baseFilename: string = 'report'): Promise<Buffer> {
+    const { driveId } = await this.resolveSiteAndDrive();
+    const headers = await this.authHeaders();
+    const safeBase = this.sanitizeName(baseFilename) || 'report';
+    const tempName = `${safeBase}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.docx`;
+    const tempFolder = '_report_tmp';
+    const folderPath = await this.ensureFolderPath(driveId, [tempFolder]);
+
+    let fileItem: { id: string };
+    if (docxBuffer.length <= 4 * 1024 * 1024) {
+      const uploadUrl = `/drives/${driveId}/root:/${encodeURI(folderPath)}/${encodeURIComponent(tempName)}:/content`;
+      const res = await this.graphCall('PUT', uploadUrl, docxBuffer, headers, {
+        contentType:
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      });
+      fileItem = { id: res.data.id };
+    } else {
+      fileItem = await this.uploadLargeFile(driveId, folderPath, tempName, docxBuffer, headers);
+    }
+
+    try {
+      // Graph: GET /drives/{drive-id}/items/{item-id}/content?format=pdf
+      // ritorna 302 a una URL preautenticata; axios la segue automaticamente.
+      const token = await this.getAccessToken();
+      const convertUrl = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${encodeURIComponent(fileItem.id)}/content?format=pdf`;
+      console.log('[SP] convert pdf:', convertUrl);
+      try {
+        const pdfRes = await axios.get(convertUrl, {
+          headers: { Authorization: `Bearer ${token}` },
+          responseType: 'arraybuffer',
+          maxRedirects: 5,
+          timeout: 120_000,
+          maxBodyLength: Infinity,
+          maxContentLength: Infinity,
+        });
+        return Buffer.from(pdfRes.data);
+      } catch (err: any) {
+        const status = err?.response?.status;
+        // Se la risposta è arraybuffer prova a decodificare il body JSON di errore
+        let bodyMsg: string | undefined;
+        const data = err?.response?.data;
+        if (data) {
+          try {
+            const text = Buffer.isBuffer(data) ? data.toString('utf8') : typeof data === 'string' ? data : JSON.stringify(data);
+            bodyMsg = text;
+          } catch {
+            /* ignore */
+          }
+        }
+        console.error(`[SP] convert pdf failed: status=${status} body=${bodyMsg?.slice(0, 500)}`);
+        const enriched = new Error(
+          `Conversione PDF fallita (${status}): ${bodyMsg?.slice(0, 200) || err?.message}`,
+        );
+        (enriched as any).graphStatus = status;
+        throw enriched;
+      }
+    } finally {
+      // best-effort cleanup
+      this.deleteFile(fileItem.id).catch((err) => {
+        console.warn('[SP] cleanup PDF temp file failed:', err?.message || err);
+      });
+    }
+  }
+
   /** Diagnostic: ritorna info di risoluzione site/drive senza eseguire upload. */
   async probe(): Promise<{
     siteId: string;

@@ -13,6 +13,7 @@ import {
   Trash2,
   Save,
   X,
+  FileText,
 } from 'lucide-react';
 import {
   Card,
@@ -29,6 +30,7 @@ import {
 } from '@heroui/react';
 import { AssistenzaRegistrazione } from '../types/assistenzaRegistrazione';
 import { updateAssistenza, UpdateAssistenzaPayload, createAssistenza, CreateAssistenzaPayload, fetchAccounts, fetchRifAssistenze, fetchTipologieAssistenza, fetchSharepointFiles, uploadSharepointFile, deleteSharepointFile, geocodeAddress, GeocodeResult } from '../services/api';
+import { downloadAssistenzaReport } from '../services/reportGenerator';
 import { getActiveTimer, removeActiveTimer, upsertActiveTimer } from '../services/timerStore';
 import AssistenzaImagesSection from './assistenza/AssistenzaImagesSection';
 import SignatureWidget, { SIGNATURE_FILENAME } from './assistenza/SignatureWidget';
@@ -98,6 +100,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>(isCreate ? 'idle' : 'saved');
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(isCreate ? null : new Date());
   const [saveClockTick, setSaveClockTick] = useState(0);
+  const [reportDownloading, setReportDownloading] = useState(false);
 
   // In modalità modifica i campi Cliente, Tipologia e Rif. Assistenza
   // provenienti da Dataverse non possono essere alterati: si bloccano se
@@ -595,6 +598,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
   }, [isCreate, updatePayloadSignature, buildUpdatePayload, updateMutation, queryClient]);
 
   const handleSave = async (opts?: { closeAfterSave?: boolean; manual?: boolean }) => {
+    if (updateMutation.isPending || createMutation.isPending) return;
     const closeAfterSave = opts?.closeAfterSave ?? false;
     const manual = opts?.manual ?? false;
 
@@ -670,6 +674,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
           size="sm"
           variant="flat"
           onPress={onBack}
+          isDisabled={isPending || reportDownloading}
           startContent={<ArrowLeft className="w-4 h-4" />}
         >
           Indietro
@@ -693,6 +698,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
           size="sm"
           variant="flat"
           onPress={onBack}
+          isDisabled={isPending || reportDownloading}
           className="text-centoraggi-deep"
         >
           Annulla
@@ -703,6 +709,7 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
             color="primary"
             onPress={() => handleSave({ closeAfterSave: true, manual: true })}
             isLoading={isPending}
+            isDisabled={isPending}
             className="font-semibold bg-centoraggi-primary"
             startContent={!isPending ? <Save className="w-4 h-4" /> : undefined}
           >
@@ -715,10 +722,38 @@ export default function AssistenzaEdit(props: AssistenzaEditProps) {
             </div>
             <Button
               size="sm"
+              variant="flat"
+              isLoading={reportDownloading}
+              isDisabled={reportDownloading || isPending}
+              onPress={async () => {
+                if (reportDownloading) return;
+                setReportDownloading(true);
+                try {
+                  await downloadAssistenzaReport(a);
+                  addToast({ title: 'Report generato', color: 'success' });
+                } catch (err: any) {
+                  console.error(err);
+                  addToast({
+                    title: 'Errore generazione report',
+                    description: err?.message || 'Impossibile generare il documento',
+                    color: 'danger',
+                  });
+                } finally {
+                  setReportDownloading(false);
+                }
+              }}
+              className="font-semibold"
+              startContent={!reportDownloading ? <FileText className="w-4 h-4" /> : undefined}
+            >
+              Report
+            </Button>
+            <Button
+              size="sm"
               color="primary"
               variant="flat"
               onPress={() => handleSave({ manual: true })}
               isLoading={isPending}
+              isDisabled={isPending}
               className="font-semibold"
               startContent={!isPending ? <Save className="w-4 h-4" /> : undefined}
             >

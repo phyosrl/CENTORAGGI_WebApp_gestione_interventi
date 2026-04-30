@@ -5,6 +5,20 @@ interface TokenResponse {
   expires_in: number;
 }
 
+export interface AssistenzeFilters {
+  search?: string;
+  statoReg?: number[];
+  clientiIds?: string[];
+  tipologie?: number[];
+  dataExact?: string;
+  from?: string;
+  to?: string;
+  nr?: string;
+  attne?: string;
+  descrizione?: string;
+  rif?: string;
+}
+
 export class DataverseService {
   private client: AxiosInstance;
   private dataverseUrl: string;
@@ -212,20 +226,41 @@ export class DataverseService {
     'statecode'
   ];
 
-  async getAssistenze(risorsaId?: string, fromISO?: string, toISO?: string): Promise<any[]> {
-    const filters: string[] = [];
-    if (risorsaId) filters.push(`_phyo_risorsa_value eq ${this.sanitizeGuid(risorsaId)}`);
-    if (fromISO) filters.push(`phyo_data ge ${fromISO}`);
-    if (toISO) filters.push(`phyo_data le ${toISO}`);
-    const filter = filters.length > 0 ? filters.join(' and ') : undefined;
+  async getAssistenze(risorsaId?: string, fromISO?: string, toISO?: string, filters?: AssistenzeFilters): Promise<any[]> {
+    const clauses: string[] = [];
+    if (risorsaId) clauses.push(`_phyo_risorsa_value eq ${this.sanitizeGuid(risorsaId)}`);
+    if (fromISO) clauses.push(`phyo_data ge ${fromISO}`);
+    if (toISO) clauses.push(`phyo_data le ${toISO}`);
+    clauses.push(...this.buildAssistenzeFilterClauses(filters));
+    const filter = clauses.length > 0 ? clauses.join(' and ') : undefined;
 
     return this.query('phyo_assistenzeregistrazionis', filter, this.assistenzeSelect, undefined, 'phyo_Rifassistenza($select=phyo_indirizzoassistenza)');
   }
 
-  async getAssistenzePaged(risorsaId?: string, pageSize?: number, skipToken?: string): Promise<{ data: any[]; totalCount: number; skipToken: string | null }> {
-    const filter = risorsaId
-      ? `_phyo_risorsa_value eq ${this.sanitizeGuid(risorsaId)}`
-      : undefined;
+  async getAssistenzaById(id: string): Promise<any | null> {
+    const result = await this.query(
+      'phyo_assistenzeregistrazionis',
+      `phyo_assistenzeregistrazioniid eq ${this.sanitizeGuid(id)}`,
+      this.assistenzeSelect,
+      undefined,
+      'phyo_Rifassistenza($select=phyo_indirizzoassistenza,phyo_tipologia_assistenza,_phyo_cliente_value)'
+    );
+    return result[0] || null;
+  }
+
+  async getAssistenzePaged(
+    risorsaId?: string,
+    pageSize?: number,
+    skipToken?: string,
+    filters?: AssistenzeFilters,
+  ): Promise<{ data: any[]; totalCount: number; skipToken: string | null }> {
+    const clauses: string[] = [];
+    if (risorsaId) {
+      clauses.push(`_phyo_risorsa_value eq ${this.sanitizeGuid(risorsaId)}`);
+    }
+    const extra = this.buildAssistenzeFilterClauses(filters);
+    clauses.push(...extra);
+    const filter = clauses.length > 0 ? clauses.join(' and ') : undefined;
 
     return this.queryPaged('phyo_assistenzeregistrazionis', {
       filter,
@@ -235,6 +270,78 @@ export class DataverseService {
       skipToken,
       expand: 'phyo_Rifassistenza($select=phyo_indirizzoassistenza)',
     });
+  }
+
+  private escapeODataString(value: string): string {
+    return value.replace(/'/g, "''");
+  }
+
+  private buildAssistenzeFilterClauses(filters?: AssistenzeFilters): string[] {
+    if (!filters) return [];
+    const clauses: string[] = [];
+
+    if (filters.statoReg && filters.statoReg.length > 0) {
+      const list = filters.statoReg
+        .filter((n) => Number.isFinite(n))
+        .map((n) => `phyo_statoreg eq ${n}`);
+      if (list.length > 0) clauses.push(`(${list.join(' or ')})`);
+    }
+
+    if (filters.clientiIds && filters.clientiIds.length > 0) {
+      const list = filters.clientiIds
+        .map((g) => this.sanitizeGuid(g))
+        .map((g) => `phyo_Rifassistenza/_phyo_cliente_value eq ${g}`);
+      if (list.length > 0) clauses.push(`(${list.join(' or ')})`);
+    }
+
+    if (filters.tipologie && filters.tipologie.length > 0) {
+      const list = filters.tipologie
+        .filter((n) => Number.isFinite(n))
+        .map((n) => `phyo_Rifassistenza/phyo_tipologia_assistenza eq ${n}`);
+      if (list.length > 0) clauses.push(`(${list.join(' or ')})`);
+    }
+
+    if (filters.dataExact && /^\d{4}-\d{2}-\d{2}$/.test(filters.dataExact)) {
+      const start = filters.dataExact;
+      const d = new Date(start + 'T00:00:00Z');
+      d.setUTCDate(d.getUTCDate() + 1);
+      const end = d.toISOString().slice(0, 10);
+      clauses.push(`(phyo_data ge ${start} and phyo_data lt ${end})`);
+    }
+
+    if (filters.from) clauses.push(`phyo_data ge ${filters.from}`);
+    if (filters.to) clauses.push(`phyo_data le ${filters.to}`);
+
+    if (filters.nr && filters.nr.trim()) {
+      clauses.push(`contains(phyo_nr, '${this.escapeODataString(filters.nr.trim())}')`);
+    }
+    if (filters.attne && filters.attne.trim()) {
+      clauses.push(`contains(phyo_attne, '${this.escapeODataString(filters.attne.trim())}')`);
+    }
+    if (filters.descrizione && filters.descrizione.trim()) {
+      clauses.push(
+        `contains(phyo_descrizioneintervento, '${this.escapeODataString(filters.descrizione.trim())}')`,
+      );
+    }
+    if (filters.rif && filters.rif.trim()) {
+      clauses.push(
+        `contains(phyo_Rifassistenza/phyo_nrassistenze, '${this.escapeODataString(filters.rif.trim())}')`,
+      );
+    }
+
+    if (filters.search && filters.search.trim()) {
+      const v = this.escapeODataString(filters.search.trim());
+      const fields = [
+        `contains(phyo_nr, '${v}')`,
+        `contains(phyo_attne, '${v}')`,
+        `contains(phyo_descrizioneintervento, '${v}')`,
+        `contains(phyo_materialeutilizzato, '${v}')`,
+        `contains(phyo_Rifassistenza/phyo_nrassistenze, '${v}')`,
+      ];
+      clauses.push(`(${fields.join(' or ')})`);
+    }
+
+    return clauses;
   }
 
   async queryPaged(entityName: string, options: {
@@ -361,6 +468,30 @@ export class DataverseService {
       ['accountid', 'name'],
       'name asc'
     );
+  }
+
+  async getAccountById(accountId: string): Promise<any | null> {
+    const result = await this.query(
+      'accounts',
+      `accountid eq ${this.sanitizeGuid(accountId)}`,
+      [
+        'accountid',
+        'name',
+        'address1_line1',
+        'address1_line2',
+        'address1_city',
+        'address1_postalcode',
+        'address1_stateorprovince',
+        'address1_country',
+        'telephone1',
+        'telephone2',
+        'emailaddress1',
+        '_primarycontactid_value',
+      ],
+      undefined,
+      'primarycontactid($select=contactid,fullname,firstname,lastname,emailaddress1,telephone1,mobilephone)'
+    );
+    return result[0] || null;
   }
 
   async getNextAssistenzaNr(): Promise<string> {

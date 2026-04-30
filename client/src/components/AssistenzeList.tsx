@@ -41,6 +41,7 @@ import {
   addToast,
 } from '@heroui/react';
 import { fetchAssistenzeRegistrazioni, fetchRifAssistenze, updateAssistenza } from '../services/api';
+import type { AssistenzeFilterParams } from '../services/api';
 import { getActiveTimers } from '../services/timerStore';
 import {
   AssistenzaRegistrazione,
@@ -208,18 +209,49 @@ function MapButton({ address }: { address?: string | null }) {
 }
 
 export default function AssistenzeList({ risorsaId, onOpen, onCreateNew, title = 'Le mie registrazioni', defaultStatoFilter = ['Programmato', 'In lavorazione'] }: AssistenzeListProps) {
+  // Valore digitato nei campi testo (NON applicato finché l'utente non preme Invio)
   const [search, setSearch] = useState('');
+  const [colFilters, setColFilters] = useState<Record<string, string>>({});
+
+  // Valore effettivamente applicato (inviato a Dataverse)
+  const [appliedSearch, setAppliedSearch] = useState('');
+  const [appliedColFilters, setAppliedColFilters] = useState<Record<string, string>>({});
+
   const [tipologiaFilter, setTipologiaFilter] = useState<Set<string>>(new Set());
   const [clienteFilter, setClienteFilter] = useState<Set<string>>(new Set());
   const [statoRegFilter, setStatoRegFilter] = useState<Set<string>>(
     () => new Set(defaultStatoFilter),
   );
-  const [colFilters, setColFilters] = useState<Record<string, string>>({});
+
   const setColFilter = useCallback((key: string, value: string) => {
     setColFilters((prev) => {
       const next = { ...prev };
       if (value) next[key] = value;
       else delete next[key];
+      return next;
+    });
+  }, []);
+
+  // Applica un singolo filtro colonna (Enter o tipo date)
+  const applyColFilter = useCallback((key: string, value: string) => {
+    setAppliedColFilters((prev) => {
+      const next = { ...prev };
+      if (value) next[key] = value;
+      else delete next[key];
+      return next;
+    });
+  }, []);
+
+  // Applica/azzera un filtro colonna (Pulisci o clear button)
+  const clearColFilter = useCallback((key: string) => {
+    setColFilters((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    setAppliedColFilters((prev) => {
+      const next = { ...prev };
+      delete next[key];
       return next;
     });
   }, []);
@@ -286,6 +318,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew, title =
   });
 
   const handleQuickStatus = useCallback((id: string, newStato: string) => {
+    if (statoMutation.isPending) return;
     const val = STATO_VALUES[newStato];
     if (val != null) statoMutation.mutate({ id, stato: val });
   }, [statoMutation]);
@@ -299,17 +332,32 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew, title =
         </Chip>
       );
     }
+    const isUpdating =
+      statoMutation.isPending && statoMutation.variables?.id === a.id;
     return (
-      <Dropdown>
+      <Dropdown isDisabled={statoMutation.isPending}>
         <DropdownTrigger>
-          <button type="button" className="cursor-pointer">
+          <button
+            type="button"
+            className={`cursor-pointer ${statoMutation.isPending ? 'opacity-60 pointer-events-none' : ''}`}
+            disabled={statoMutation.isPending}
+            aria-busy={isUpdating}
+          >
             <Chip size="sm" variant="flat" color={statoRegColor[a.statoReg] || 'default'} className="cursor-pointer">
-              {a.statoReg || '—'} ▾
+              {isUpdating ? (
+                <span className="inline-flex items-center gap-1">
+                  <Spinner size="sm" color="current" />
+                  {a.statoReg || '—'}
+                </span>
+              ) : (
+                <>{a.statoReg || '—'} ▾</>
+              )}
             </Chip>
           </button>
         </DropdownTrigger>
         <DropdownMenu
           aria-label="Cambia stato"
+          disabledKeys={statoMutation.isPending ? transitions : []}
           onAction={(key) => handleQuickStatus(a.id, key as string)}
         >
           {transitions.map((s) => {
@@ -323,13 +371,15 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew, title =
         </DropdownMenu>
       </Dropdown>
     );
-  }, [handleQuickStatus]);
+  }, [handleQuickStatus, statoMutation.isPending, statoMutation.variables]);
 
   const renderHeader = useCallback((key: string, label: string, options?: { choices?: string[]; selected?: Set<string>; onChange?: (next: Set<string>) => void; searchable?: boolean; inputType?: 'text' | 'date' }) => {
     const value = colFilters[key] || '';
+    const appliedValue = appliedColFilters[key] || '';
     const hasChoices = !!options?.choices;
     const choiceCount = options?.selected?.size ?? 0;
-    const isActive = hasChoices ? choiceCount > 0 : !!value;
+    const isActive = hasChoices ? choiceCount > 0 : !!appliedValue;
+    const isDirty = !hasChoices && value !== appliedValue;
     const inputType = options?.inputType || 'text';
     return (
       <div className="flex items-center justify-between gap-1 w-full text-left">
@@ -364,18 +414,41 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew, title =
                   size="sm"
                   autoFocus
                   type={inputType}
-                  placeholder={inputType === 'date' ? '' : `Filtra ${label.toLowerCase()}...`}
+                  placeholder={inputType === 'date' ? '' : `Filtra ${label.toLowerCase()} e premi Invio`}
                   value={value}
-                  onValueChange={(v) => setColFilter(key, v)}
+                  onValueChange={(v) => {
+                    setColFilter(key, v);
+                    if (inputType === 'date') applyColFilter(key, v);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && inputType !== 'date') {
+                      e.preventDefault();
+                      applyColFilter(key, value);
+                    }
+                  }}
                   isClearable={inputType !== 'date'}
-                  onClear={() => setColFilter(key, '')}
+                  onClear={() => clearColFilter(key)}
                   variant="bordered"
                 />
+                {inputType !== 'date' && (
+                  <div className="flex items-center justify-between mt-1.5 gap-2">
+                    <span className="text-[11px] text-default-400">Premi Invio per applicare</span>
+                    {isDirty && (
+                      <button
+                        type="button"
+                        className="text-[11px] text-primary hover:underline"
+                        onClick={() => applyColFilter(key, value)}
+                      >
+                        Applica
+                      </button>
+                    )}
+                  </div>
+                )}
                 {inputType === 'date' && value && (
                   <button
                     type="button"
                     className="mt-1 text-[11px] text-primary hover:underline"
-                    onClick={() => setColFilter(key, '')}
+                    onClick={() => clearColFilter(key)}
                   >
                     Pulisci
                   </button>
@@ -386,7 +459,95 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew, title =
         </Popover>
       </div>
     );
-  }, [colFilters, setColFilter]);
+  }, [colFilters, appliedColFilters, setColFilter, applyColFilter, clearColFilter]);
+
+  const { data: rifAssistenzeList } = useQuery({
+    queryKey: ['rifAssistenze'],
+    queryFn: fetchRifAssistenze,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  // Mappe etichetta -> valori server per filtri choice (cliente / tipologia)
+  const clienteNameToIds = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    if (!rifAssistenzeList) return map;
+    for (const r of rifAssistenzeList) {
+      const name =
+        r['_phyo_cliente_value@OData.Community.Display.V1.FormattedValue'] ?? '';
+      const id = r._phyo_cliente_value;
+      if (!name || !id) continue;
+      if (!map.has(name)) map.set(name, new Set());
+      map.get(name)!.add(id);
+    }
+    return map;
+  }, [rifAssistenzeList]);
+
+  const tipologiaLabelToValues = useMemo(() => {
+    const map = new Map<string, Set<number>>();
+    if (!rifAssistenzeList) return map;
+    for (const r of rifAssistenzeList) {
+      const label =
+        r['phyo_tipologia_assistenza@OData.Community.Display.V1.FormattedValue'] ?? '';
+      const value = r.phyo_tipologia_assistenza;
+      if (!label || value == null) continue;
+      const num = typeof value === 'number' ? value : Number(value);
+      if (!Number.isFinite(num)) continue;
+      if (!map.has(label)) map.set(label, new Set());
+      map.get(label)!.add(num);
+    }
+    return map;
+  }, [rifAssistenzeList]);
+
+  // Costruisce i filtri da inviare a Dataverse a partire dai valori APPLICATI
+  // (search e filtri colonna testo si aggiornano solo quando l'utente preme
+  // Invio; multi-select e date si applicano immediatamente).
+  const serverFilters = useMemo<AssistenzeFilterParams>(() => {
+    const f: AssistenzeFilterParams = {};
+    if (appliedSearch.trim()) f.search = appliedSearch.trim();
+
+    if (statoRegFilter.size > 0) {
+      const vals: number[] = [];
+      for (const s of statoRegFilter) {
+        const v = STATO_VALUES[s];
+        if (v != null) vals.push(v);
+      }
+      if (vals.length > 0) f.statoReg = vals;
+    }
+
+    if (clienteFilter.size > 0 && clienteNameToIds.size > 0) {
+      const ids = new Set<string>();
+      for (const name of clienteFilter) {
+        const set = clienteNameToIds.get(name);
+        if (set) for (const id of set) ids.add(id);
+      }
+      if (ids.size > 0) f.clientiIds = Array.from(ids);
+    }
+
+    if (tipologiaFilter.size > 0 && tipologiaLabelToValues.size > 0) {
+      const vals = new Set<number>();
+      for (const label of tipologiaFilter) {
+        const set = tipologiaLabelToValues.get(label);
+        if (set) for (const v of set) vals.add(v);
+      }
+      if (vals.size > 0) f.tipologie = Array.from(vals);
+    }
+
+    if (appliedColFilters.data) f.dataExact = appliedColFilters.data;
+    if (appliedColFilters.nr?.trim()) f.nr = appliedColFilters.nr.trim();
+    if (appliedColFilters.attne?.trim()) f.attne = appliedColFilters.attne.trim();
+    if (appliedColFilters.descrizione?.trim()) f.descrizione = appliedColFilters.descrizione.trim();
+    if (appliedColFilters.rif?.trim()) f.rif = appliedColFilters.rif.trim();
+
+    return f;
+  }, [
+    appliedSearch,
+    appliedColFilters,
+    statoRegFilter,
+    clienteFilter,
+    tipologiaFilter,
+    clienteNameToIds,
+    tipologiaLabelToValues,
+  ]);
 
   const {
     data: pagedData,
@@ -397,10 +558,11 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew, title =
     error,
     refetch,
   } = useInfiniteQuery({
-    queryKey: ['assistenzeRegistrazioni', risorsaId],
+    queryKey: ['assistenzeRegistrazioni', risorsaId, serverFilters],
     queryFn: ({ pageParam }) => fetchAssistenzeRegistrazioni(risorsaId, {
       pageSize: PAGE_SIZE,
       skipToken: pageParam ?? undefined,
+      filters: serverFilters,
     }),
     getNextPageParam: (lastPage) => lastPage.skipToken ?? undefined,
     initialPageParam: undefined as string | undefined,
@@ -419,15 +581,15 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew, title =
   const loadAll = useCallback(async () => {
     setLoadingAll(true);
     try {
-      const allData = await fetchAssistenzeRegistrazioni(risorsaId);
-      queryClient.setQueryData(['assistenzeRegistrazioni', risorsaId], {
+      const allData = await fetchAssistenzeRegistrazioni(risorsaId, { filters: serverFilters });
+      queryClient.setQueryData(['assistenzeRegistrazioni', risorsaId, serverFilters], {
         pages: [allData],
         pageParams: [undefined],
       });
     } finally {
       setLoadingAll(false);
     }
-  }, [risorsaId, queryClient]);
+  }, [risorsaId, queryClient, serverFilters]);
 
   // Mobile infinite scroll
   useEffect(() => {
@@ -447,11 +609,6 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew, title =
     return () => observer.disconnect();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage, allLoaded, loadingAll]);
 
-  const { data: rifAssistenzeList } = useQuery({
-    queryKey: ['rifAssistenze'],
-    queryFn: fetchRifAssistenze,
-    staleTime: 10 * 60 * 1000,
-  });
 
   const assistenze = useMemo(() => {
     const mapped = rawData.map(mapAssistenzaRegistrazione);
@@ -507,57 +664,10 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew, title =
   }, [assistenze]);
 
   const filtered = useMemo(() => {
-    let result = assistenze;
-    if (tipologiaFilter.size > 0) {
-      result = result.filter((a) => tipologiaFilter.has(a.tipologiaAssistenza));
-    }
-    if (clienteFilter.size > 0) {
-      result = result.filter((a) => clienteFilter.has(a.clienteNome || ''));
-    }
-    if (statoRegFilter.size > 0) {
-      result = result.filter((a) => statoRegFilter.has(a.statoReg));
-    }
-    // Filtri per-colonna (contains, case-insensitive)
-    const entries = Object.entries(colFilters).filter(([, v]) => v && v.trim());
-    if (entries.length > 0) {
-      result = result.filter((a) => {
-        for (const [key, raw] of entries) {
-          const v = raw.toLowerCase();
-          let cell = '';
-          switch (key) {
-            case 'data': {
-              // raw è yyyy-mm-dd dal date picker
-              if (!a.data) return false;
-              const d = new Date(a.data);
-              const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-              if (iso !== raw) return false;
-              continue;
-            }
-            case 'nr': cell = a.nr.toLowerCase(); break;
-            case 'cliente': cell = a.clienteNome.toLowerCase(); break;
-            case 'rif': cell = a.rifAssistenzaNome.toLowerCase(); break;
-            case 'attne': cell = a.attne.toLowerCase(); break;
-            case 'descrizione': cell = a.descrizioneIntervento.toLowerCase(); break;
-            default: cell = '';
-          }
-          if (!cell.includes(v)) return false;
-        }
-        return true;
-      });
-    }
-    if (!search) return result;
-    const q = search.toLowerCase();
-    return result.filter(
-      (a) =>
-        a.nr.toLowerCase().includes(q) ||
-        a.rifAssistenzaNome.toLowerCase().includes(q) ||
-        a.clienteNome.toLowerCase().includes(q) ||
-        a.tipologiaAssistenza.toLowerCase().includes(q) ||
-        a.attne.toLowerCase().includes(q) ||
-        a.descrizioneIntervento.toLowerCase().includes(q) ||
-        a.materialeUtilizzato.toLowerCase().includes(q)
-    );
-  }, [assistenze, search, tipologiaFilter, clienteFilter, statoRegFilter, colFilters]);
+    // I filtri sono ora applicati esclusivamente lato server (Dataverse) via
+    // serverFilters/queryKey: qui restituiamo i record così come sono.
+    return assistenze;
+  }, [assistenze]);
 
   const globalFiltered = useMemo(() => {
     return [...filtered].sort((a, b) => {
@@ -584,26 +694,28 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew, title =
   }, [assistenze]);
 
   const hasActiveFilters =
+    !!appliedSearch ||
     !!search ||
     tipologiaFilter.size > 0 ||
     clienteFilter.size > 0 ||
     Object.keys(colFilters).length > 0 ||
+    Object.keys(appliedColFilters).length > 0 ||
     statoRegFilter.size > 0;
 
   const resetFilters = useCallback(() => {
     setSearch('');
+    setAppliedSearch('');
     setTipologiaFilter(new Set());
     setClienteFilter(new Set());
     setColFilters({});
+    setAppliedColFilters({});
     setStatoRegFilter(new Set());
   }, []);
 
-  // Auto-load tutti i record quando ci sono filtri attivi (server-side filtering UX)
-  useEffect(() => {
-    if (hasActiveFilters && hasNextPage && !isFetchingNextPage && !loadingAll) {
-      void loadAll();
-    }
-  }, [hasActiveFilters, hasNextPage, isFetchingNextPage, loadingAll, loadAll]);
+  // Auto-load tutti i record quando ci sono filtri attivi: ora i filtri sono
+  // applicati server-side (Dataverse) tramite la queryKey, quindi non serve
+  // più caricare l'intero dataset client-side. Manteniamo loadAll disponibile
+  // solo per usi espliciti (es. esportazioni).
 
   if (isLoading) {
     return <ListSkeleton rows={6} statsCount={4} />;
@@ -661,16 +773,36 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew, title =
       <div className="sticky top-[calc(4.5rem+44px)] sm:top-0 z-30 -mx-2 sm:-mx-4 px-2 sm:px-4 py-1.5 sm:py-0 bg-white/90 sm:bg-transparent backdrop-blur sm:backdrop-blur-0 border-b border-default-200/60 sm:border-0 sm:static">
       <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 sm:items-center">
         <Input
-          placeholder="Cerca NR, assistenza, descrizione..."
+          placeholder="Cerca NR, assistenza, descrizione... (Invio per applicare)"
           value={search}
           onValueChange={setSearch}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              setAppliedSearch(search);
+            }
+          }}
           isClearable
-          onClear={() => setSearch('')}
+          onClear={() => {
+            setSearch('');
+            setAppliedSearch('');
+          }}
           className="sm:flex-1"
           variant="bordered"
           size="sm"
           classNames={{ inputWrapper: 'h-10 min-h-10' }}
           startContent={<Search className="w-4 h-4 text-default-400 flex-shrink-0" />}
+          endContent={
+            search !== appliedSearch ? (
+              <button
+                type="button"
+                onClick={() => setAppliedSearch(search)}
+                className="text-[11px] text-primary hover:underline pr-1"
+              >
+                Applica
+              </button>
+            ) : null
+          }
         />
         <Select
           aria-label="Filtra per tipologia"
@@ -918,6 +1050,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew, title =
               variant="flat"
               color="secondary"
               isLoading={loadingAll}
+              isDisabled={loadingAll || isFetchingNextPage}
               onPress={loadAll}
             >
               Carica tutto ({totalCount - loadedCount} rimanenti)
@@ -930,6 +1063,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew, title =
               color="primary"
               variant="flat"
               isLoading={isFetchingNextPage}
+              isDisabled={isFetchingNextPage || loadingAll}
               onPress={() => fetchNextPage()}
             >
               Carica più dati
@@ -938,6 +1072,7 @@ export default function AssistenzeList({ risorsaId, onOpen, onCreateNew, title =
               variant="flat"
               color="secondary"
               isLoading={loadingAll}
+              isDisabled={loadingAll || isFetchingNextPage}
               onPress={loadAll}
             >
               Carica tutto ({totalCount - loadedCount} rimanenti)

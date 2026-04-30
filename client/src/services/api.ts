@@ -119,15 +119,46 @@ export interface PaginatedAssistenzeResponse {
   hasMore: boolean;
 }
 
+export interface AssistenzeFilterParams {
+  search?: string;
+  statoReg?: number[];
+  clientiIds?: string[];
+  tipologie?: number[];
+  dataExact?: string;
+  nr?: string;
+  attne?: string;
+  descrizione?: string;
+  rif?: string;
+}
+
 export async function fetchAssistenzeRegistrazioni(
   risorsaId: string,
-  options?: { pageSize?: number; skipToken?: string; from?: string; to?: string }
+  options?: {
+    pageSize?: number;
+    skipToken?: string;
+    from?: string;
+    to?: string;
+    filters?: AssistenzeFilterParams;
+  }
 ): Promise<PaginatedAssistenzeResponse> {
   const params: Record<string, string> = { risorsaId };
   if (options?.pageSize) params.pageSize = String(options.pageSize);
   if (options?.skipToken) params.skipToken = options.skipToken;
   if (options?.from) params.from = options.from;
   if (options?.to) params.to = options.to;
+
+  const f = options?.filters;
+  if (f) {
+    if (f.search && f.search.trim()) params.search = f.search.trim();
+    if (f.statoReg && f.statoReg.length > 0) params.statoReg = f.statoReg.join(',');
+    if (f.clientiIds && f.clientiIds.length > 0) params.clientiIds = f.clientiIds.join(',');
+    if (f.tipologie && f.tipologie.length > 0) params.tipologie = f.tipologie.join(',');
+    if (f.dataExact) params.dataExact = f.dataExact;
+    if (f.nr && f.nr.trim()) params.nr = f.nr.trim();
+    if (f.attne && f.attne.trim()) params.attne = f.attne.trim();
+    if (f.descrizione && f.descrizione.trim()) params.descrizione = f.descrizione.trim();
+    if (f.rif && f.rif.trim()) params.rif = f.rif.trim();
+  }
 
   const { data } = await api.get<{
     success: boolean;
@@ -227,6 +258,37 @@ export interface Account {
 
 export async function fetchAccounts(): Promise<Account[]> {
   const { data } = await api.get<{ success: boolean; data: Account[] }>('/dataverse/accounts');
+  return data.data;
+}
+
+export interface AccountDetail {
+  accountid: string;
+  name: string | null;
+  address1_line1?: string | null;
+  address1_line2?: string | null;
+  address1_city?: string | null;
+  address1_postalcode?: string | null;
+  address1_stateorprovince?: string | null;
+  address1_country?: string | null;
+  telephone1?: string | null;
+  telephone2?: string | null;
+  emailaddress1?: string | null;
+  _primarycontactid_value?: string | null;
+  primarycontactid?: {
+    contactid: string;
+    fullname?: string | null;
+    firstname?: string | null;
+    lastname?: string | null;
+    emailaddress1?: string | null;
+    telephone1?: string | null;
+    mobilephone?: string | null;
+  } | null;
+}
+
+export async function fetchAccountById(accountId: string): Promise<AccountDetail> {
+  const { data } = await api.get<{ success: boolean; data: AccountDetail }>(
+    `/dataverse/accounts/${accountId}`
+  );
   return data.data;
 }
 

@@ -1,7 +1,8 @@
 import { app, HttpRequest, HttpResponseInit } from '@azure/functions';
-import { DataverseService } from '../../services/dataverseService.js';
+import { DataverseService, AssistenzeFilters } from '../../services/dataverseService.js';
 import { SharePointService } from '../../services/sharepointService.js';
 import { isGuid, requireAuth } from '../../services/auth.js';
+import { buildAssistenzaDocx, buildReportFieldValues } from '../../services/reportService.js';
 
 const dataverseService = new DataverseService(
   process.env.DATAVERSE_URL || '',
@@ -35,13 +36,32 @@ export async function dataverseAssistenze(request: HttpRequest): Promise<HttpRes
     const fromISO = request.query.get('from') || undefined;
     const toISO = request.query.get('to') || undefined;
 
+    const parseCsv = (raw: string | null) =>
+      raw ? raw.split(',').map((s) => s.trim()).filter(Boolean) : [];
+    const parseCsvNumbers = (raw: string | null) =>
+      parseCsv(raw)
+        .map((s) => Number(s))
+        .filter((n) => Number.isFinite(n));
+
+    const filters: AssistenzeFilters = {
+      search: request.query.get('search') || undefined,
+      statoReg: parseCsvNumbers(request.query.get('statoReg')),
+      clientiIds: parseCsv(request.query.get('clientiIds')),
+      tipologie: parseCsvNumbers(request.query.get('tipologie')),
+      dataExact: request.query.get('dataExact') || undefined,
+      nr: request.query.get('nr') || undefined,
+      attne: request.query.get('attne') || undefined,
+      descrizione: request.query.get('descrizione') || undefined,
+      rif: request.query.get('rif') || undefined,
+    };
+
     if (pageSizeParam) {
       const pageSize = parseInt(pageSizeParam, 10);
       if (isNaN(pageSize) || pageSize < 1 || pageSize > 100) {
         return { status: 400, jsonBody: { error: 'pageSize deve essere tra 1 e 100' } };
       }
 
-      const result = await dataverseService.getAssistenzePaged(auth.user.id, pageSize, skipToken);
+      const result = await dataverseService.getAssistenzePaged(auth.user.id, pageSize, skipToken, filters);
       return {
         status: 200,
         jsonBody: {
@@ -54,7 +74,7 @@ export async function dataverseAssistenze(request: HttpRequest): Promise<HttpRes
       };
     }
 
-    const assistenze = await dataverseService.getAssistenze(auth.user.id, fromISO, toISO);
+    const assistenze = await dataverseService.getAssistenze(auth.user.id, fromISO, toISO, filters);
     return {
       status: 200,
       jsonBody: {
@@ -318,6 +338,171 @@ app.http('getAccounts', {
   authLevel: 'anonymous',
   route: 'dataverse/accounts',
   handler: getAccounts,
+});
+
+export async function getAccountById(request: HttpRequest): Promise<HttpResponseInit> {
+  const auth = requireAuth(request);
+  if (auth.response) return auth.response;
+
+  try {
+    const accountId = request.params.accountId;
+    if (!accountId || !isGuid(accountId)) {
+      return { status: 400, jsonBody: { error: 'accountId non valido' } };
+    }
+    const item = await dataverseService.getAccountById(accountId);
+    if (!item) {
+      return { status: 404, jsonBody: { error: 'Account non trovato' } };
+    }
+    return { status: 200, jsonBody: { success: true, data: item } };
+  } catch (error: any) {
+    console.error('getAccountById error:', error?.message || error);
+    return {
+      status: 500,
+      jsonBody: { error: 'Failed to fetch account' },
+    };
+  }
+}
+
+app.http('getAccountById', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'dataverse/accounts/{accountId}',
+  handler: getAccountById,
+});
+
+export async function getAssistenzaReport(request: HttpRequest): Promise<HttpResponseInit> {
+  const auth = requireAuth(request);
+  if (auth.response) return auth.response;
+
+  try {
+    const registrazioneId = request.params.registrazioneId;
+    if (!registrazioneId || !isGuid(registrazioneId)) {
+      return { status: 400, jsonBody: { error: 'registrazioneId non valido' } };
+    }
+
+    const ownsRecord = await dataverseService.userOwnsAssistenza(registrazioneId, auth.user.id);
+    if (!ownsRecord) {
+      return { status: 403, jsonBody: { error: 'Accesso negato alla registrazione' } };
+    }
+
+    const format = (request.query.get('format') || 'pdf').toLowerCase();
+    if (format !== 'pdf' && format !== 'docx') {
+      return { status: 400, jsonBody: { error: 'format deve essere "pdf" o "docx"' } };
+    }
+
+    const assistenza = await dataverseService.getAssistenzaById(registrazioneId);
+    if (!assistenza) {
+      return { status: 404, jsonBody: { error: 'Registrazione non trovata' } };
+    }
+
+    const rif = assistenza.phyo_Rifassistenza || null;
+    const clienteId: string | null = rif?._phyo_cliente_value || null;
+
+    let account: any = null;
+    if (clienteId) {
+      try {
+        account = await dataverseService.getAccountById(clienteId);
+      } catch (err: any) {
+        console.warn('getAccountById fallito:', err?.message || err);
+      }
+    }
+
+    const values = buildReportFieldValues(assistenza, account);
+    const docxBuffer = await buildAssistenzaDocx(values);
+    // Azure Functions v4 (Node) può corrompere binari se body è un Buffer
+    // Node con offset != 0; usare un Uint8Array nuovo garantisce la copia
+    // sui byte effettivi del file.
+    const docxBytes = new Uint8Array(
+      docxBuffer.buffer,
+      docxBuffer.byteOffset,
+      docxBuffer.byteLength
+    ).slice();
+
+    const safeNr = (assistenza.phyo_nr || 'assistenza').replace(/[^a-zA-Z0-9_-]+/g, '_');
+
+    if (format === 'docx') {
+      return {
+        status: 200,
+        headers: {
+          'Content-Type':
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'Content-Disposition': `attachment; filename="Report_assistenza_${safeNr}.docx"`,
+          'Content-Length': String(docxBytes.byteLength),
+        },
+        body: docxBytes,
+      };
+    }
+
+    // format === 'pdf' - tenta conversione via SharePoint/Graph; se fallisce
+    // (es. 406 perché il file appena caricato non è ancora indicizzato per la
+    // conversione) effettua un retry con piccolo delay e in ultima istanza
+    // fallback al docx così l'utente riceve comunque il report.
+    let pdfBuffer: Buffer | null = null;
+    let lastErr: any = null;
+    for (let attempt = 0; attempt < 2 && !pdfBuffer; attempt++) {
+      try {
+        if (attempt > 0) {
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+        pdfBuffer = await sharepointService.convertDocxToPdf(
+          docxBuffer,
+          `Report_assistenza_${safeNr}`,
+        );
+      } catch (err: any) {
+        lastErr = err;
+        const status = err?.graphStatus ?? err?.response?.status;
+        console.warn(
+          `[Report] convertDocxToPdf attempt ${attempt + 1} failed: status=${status} message=${err?.message}`,
+        );
+      }
+    }
+
+    if (pdfBuffer) {
+      const pdfBytes = new Uint8Array(
+        pdfBuffer.buffer,
+        pdfBuffer.byteOffset,
+        pdfBuffer.byteLength
+      ).slice();
+      return {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `attachment; filename="Report_assistenza_${safeNr}.pdf"`,
+          'Content-Length': String(pdfBytes.byteLength),
+        },
+        body: pdfBytes,
+      };
+    }
+
+    // Fallback: conversione PDF non disponibile, restituisci docx con header
+    // X-Report-Format così il client sa che è stato fatto fallback.
+    console.warn('[Report] PDF non disponibile, fallback a docx:', lastErr?.message);
+    return {
+      status: 200,
+      headers: {
+        'Content-Type':
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'Content-Disposition': `attachment; filename="Report_assistenza_${safeNr}.docx"`,
+        'Content-Length': String(docxBytes.byteLength),
+        'X-Report-Format': 'docx-fallback',
+        'X-Report-Pdf-Error': String(lastErr?.message || 'unknown').slice(0, 200),
+      },
+      body: docxBytes,
+    };
+  } catch (error: any) {
+    console.error('getAssistenzaReport error:', error?.message || error);
+    return {
+      status: 500,
+      jsonBody: { error: error?.message || 'Failed to generate report' },
+    };
+  }
+}
+
+app.http('getAssistenzaReport', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'dataverse/assistenze/{registrazioneId}/report',
+  handler: getAssistenzaReport,
 });
 
 export async function getAnnotations(request: HttpRequest): Promise<HttpResponseInit> {
